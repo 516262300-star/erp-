@@ -1,0 +1,17 @@
+.env
+*.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+logs/*
+!logs/.gitkeep
+erp_auto_upload/.env
+erp_auto_upload/logs/*
+!erp_auto_upload/logs/.gitkeep
+erp_auto_upload/__pycache__/
+erp_auto_upload/**/__pycache__/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
