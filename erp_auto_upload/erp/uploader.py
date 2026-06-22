@@ -474,6 +474,19 @@ def build_no_color_image_map(file_paths: list[Path]) -> dict[str, Path]:
     return image_map
 
 
+def sku_image_cell_has_uploaded_image(page: Page, index_value: str) -> bool:
+    return bool(
+        page.locator(f"td[index='{index_value}']").first.evaluate(
+            """cell => {
+                const img = cell.querySelector('img');
+                if (!img) return false;
+                const src = (img.getAttribute('src') || '').trim();
+                return src && !src.startsWith('data:') && img.complete && img.naturalWidth > 0;
+            }"""
+        )
+    )
+
+
 def upload_sku_no_color_images(page: Page, file_paths: list[Path]) -> None:
     if not file_paths:
         logger.info("无色图为空，跳过上传")
@@ -492,9 +505,14 @@ def upload_sku_no_color_images(page: Page, file_paths: list[Path]) -> None:
         return
 
     uploaded_count = 0
+    skipped_existing_count = 0
     missing_keys: set[str] = set()
     for index_value in indexes:
         if not isinstance(index_value, str):
+            continue
+        if sku_image_cell_has_uploaded_image(page, index_value):
+            logger.info("无色图已存在，跳过：{}", index_value)
+            skipped_existing_count += 1
             continue
         key = main_model_key(index_value)
         image_path = image_map.get(key)
@@ -523,7 +541,7 @@ def upload_sku_no_color_images(page: Page, file_paths: list[Path]) -> None:
 
     for key in sorted(missing_keys):
         logger.warning("无色图缺失：主型号 {} 未在无色图文件夹中找到对应图片，已跳过该主型号", key)
-    logger.info("无色图上传完成：{} 个规格行", uploaded_count)
+    logger.info("无色图上传完成：{} 个规格行，已存在跳过：{} 个规格行", uploaded_count, skipped_existing_count)
 
 
 def close_upload_modal(page: Page) -> None:
