@@ -145,16 +145,17 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         exclude_keywords=("无logo", "无 logo", "原图"),
     ) or material_root / "主图"
     main_original_dir = first_existing_dir(
+        main_dir / "无logo主图",
+        main_dir / "主图无logo",
+        main_dir / "无logo图",
+        main_dir / "无 logo 图",
+        main_dir / "无logo",
+        main_dir / "无 logo",
+        main_dir / "原图",
         material_root / "无logo主图",
         material_root / "主图无logo",
         material_root / "无logo图",
         material_root / "无 logo 图",
-        material_root / "原图",
-        main_dir / "无logo",
-        main_dir / "无 logo",
-        main_dir / "无logo图",
-        main_dir / "无 logo 图",
-        main_dir / "原图",
     )
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
