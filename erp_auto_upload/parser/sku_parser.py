@@ -10,7 +10,9 @@ KNOWN_COLORS = [
     "珍珠黑",
     "铜拉丝",
     "铜本色",
+    "咖啡铜",
     "古铜色",
+    "玫瑰金",
     "亮镍",
     "钛银",
     "铬色",
@@ -67,7 +69,7 @@ def normalize_color(color: str) -> tuple[str, str]:
     color = color.strip()
     if color in {"钛银", "亮镍"}:
         return "亮镍", "钛银"
-    if color == "亮金":
+    if color in {"亮金", "玫瑰金"}:
         return "玫瑰金", "亮金"
     if color == "铬色":
         return "铬", "铬色"

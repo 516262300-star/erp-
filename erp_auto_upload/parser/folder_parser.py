@@ -12,7 +12,7 @@ from parser.sku_parser import ParsedSku, parse_sku_from_stem
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4"}
-VIDEO_KEYWORDS = ("1:1", "1-1", "800")
+VIDEO_KEYWORDS = ("1:1", "1：1", "1-1", "800")
 
 
 @dataclass(frozen=True)
@@ -149,6 +149,8 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         main_dir / "主图无logo",
         main_dir / "无logo图",
         main_dir / "无 logo 图",
+        main_dir / "去logo主图",
+        main_dir / "去 logo 主图",
         main_dir / "无logo",
         main_dir / "无 logo",
         main_dir / "原图",
@@ -156,6 +158,8 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         material_root / "主图无logo",
         material_root / "无logo图",
         material_root / "无 logo 图",
+        material_root / "去logo主图",
+        material_root / "去 logo 主图",
     )
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
