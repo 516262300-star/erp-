@@ -53,6 +53,7 @@ def select_autocomplete_option(
     _selector_required(option_selector, f"{field_name} dropdown")
 
     last_options: list[str] = []
+    has_fallback = bool(fallback_queries)
     search_plan: list[tuple[str, str, bool]] = [(query, expected_text, False)]
     search_plan.extend((fallback_query, fallback_query, True) for fallback_query in (fallback_queries or []) if fallback_query)
 
@@ -80,7 +81,8 @@ def select_autocomplete_option(
                 input_selector,
             )
 
-        deadline = time.monotonic() + 20
+        wait_seconds = 3 if has_fallback and not allow_unique_prefix else 20
+        deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             options = page.locator(option_selector).evaluate_all(
                 """els => els
