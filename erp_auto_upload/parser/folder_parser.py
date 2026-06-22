@@ -74,11 +74,11 @@ def first_matching_child_dir(
 
 
 def list_detail_images(detail_dir: Path) -> list[Path]:
-    images = list_files(detail_dir, IMAGE_EXTENSIONS)
-    if images:
-        return images
     nested_images_dir = detail_dir / "images"
-    return list_files(nested_images_dir, IMAGE_EXTENSIONS)
+    nested_images = list_files(nested_images_dir, IMAGE_EXTENSIONS)
+    if nested_images:
+        return nested_images
+    return list_files(detail_dir, IMAGE_EXTENSIONS)
 
 
 def pick_video(video_dir: Path) -> Path | None:
