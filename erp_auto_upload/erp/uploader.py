@@ -409,6 +409,20 @@ def _resolve_sku_size_index(page: Page, sku_value: str) -> str:
         return candidates[0]
     if len(candidates) > 1:
         raise RuntimeError(f"SKU 尺寸图上传行匹配到多个候选：{expected} -> {candidates}")
+
+    base_model = model.split("-", 1)[0]
+    base_candidates = [
+        index
+        for index in indexes
+        if isinstance(index, str)
+        and index.startswith(base_model)
+        and index.endswith(suffix)
+    ]
+    if len(base_candidates) == 1:
+        logger.debug("尺寸图行使用 ERP 基础型号唯一候选：{} -> {}", expected, base_candidates[0])
+        return base_candidates[0]
+    if len(base_candidates) > 1:
+        raise RuntimeError(f"SKU 尺寸图上传行按基础型号匹配到多个候选：{expected} -> {base_candidates}")
     raise RuntimeError(f"未找到 SKU 尺寸图上传行：{expected}，页面候选：{indexes}")
 
 

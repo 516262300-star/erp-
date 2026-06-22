@@ -40,64 +40,84 @@ def fill_link_title(page: Page, link_title: str) -> None:
     page.locator(sel.LINK_TITLE_INPUT).fill(link_title)
 
 
-def select_autocomplete_option(page: Page, input_selector: str, option_selector: str, query: str, expected_text: str, field_name: str) -> None:
+def select_autocomplete_option(
+    page: Page,
+    input_selector: str,
+    option_selector: str,
+    query: str,
+    expected_text: str,
+    field_name: str,
+    fallback_queries: list[str] | None = None,
+) -> str:
     _selector_required(input_selector, f"{field_name} input")
     _selector_required(option_selector, f"{field_name} dropdown")
-    page.locator(input_selector).click()
-    page.evaluate("""(optionSelector) => document.querySelectorAll(optionSelector).forEach(el => el.remove())""", option_selector)
-    if input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
-        page.evaluate(
-            """({selector, value}) => {
-                const input = document.querySelector(selector);
-                if (!input) throw new Error(`未找到输入框: ${selector}`);
-                input.value = value;
-                input.dispatchEvent(new Event('input', {bubbles: true}));
-                input.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
-                if (typeof window.postProduct === 'function') window.postProduct();
-            }""",
-            {"selector": input_selector, "value": query},
-        )
-    else:
-        page.locator(input_selector).fill("")
-        type_query = "玫瑰" if expected_text == "玫瑰金" else query
-        page.locator(input_selector).type(type_query, delay=120)
-        page.evaluate(
-            """(selector) => window.jQuery && window.jQuery(selector).trigger('keyup')""",
-            input_selector,
-        )
 
-    deadline = time.monotonic() + 20
     last_options: list[str] = []
-    while time.monotonic() < deadline:
-        options = page.locator(option_selector).evaluate_all(
-            """els => els
-                .filter(el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length))
-                .map(el => (el.innerText || '').trim())"""
-        )
-        last_options = options
-        matched_text = expected_text if expected_text in options else ""
-        if not matched_text and input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
-            matched_text = next((option for option in options if option.startswith(expected_text)), "")
-        if matched_text:
+    search_plan: list[tuple[str, str, bool]] = [(query, expected_text, False)]
+    search_plan.extend((fallback_query, fallback_query, True) for fallback_query in (fallback_queries or []) if fallback_query)
+
+    for current_query, current_expected, allow_unique_prefix in search_plan:
+        page.locator(input_selector).click()
+        page.evaluate("""(optionSelector) => document.querySelectorAll(optionSelector).forEach(el => el.remove())""", option_selector)
+        if input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
             page.evaluate(
-                """({selector, text}) => {
-                    const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-                    const target = Array.from(document.querySelectorAll(selector))
-                        .filter(visible)
-                        .find(el => (el.innerText || '').trim() === text);
-                    target.click();
+                """({selector, value}) => {
+                    const input = document.querySelector(selector);
+                    if (!input) throw new Error(`未找到输入框: ${selector}`);
+                    input.value = value;
+                    input.dispatchEvent(new Event('input', {bubbles: true}));
+                    input.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+                    if (typeof window.postProduct === 'function') window.postProduct();
                 }""",
-                {"selector": option_selector, "text": matched_text},
+                {"selector": input_selector, "value": current_query},
             )
-            break
-        page.wait_for_timeout(500)
-    else:
-        actual = page.locator(input_selector).input_value().strip()
-        raise RuntimeError(f"{field_name}未找到候选：{expected_text}，输入框当前值：{actual}，当前候选：{last_options}")
-    page.locator(input_selector).wait_for(state="visible", timeout=5_000)
+        else:
+            page.locator(input_selector).fill("")
+            type_query = "玫瑰" if expected_text == "玫瑰金" else current_query
+            page.locator(input_selector).type(type_query, delay=120)
+            page.evaluate(
+                """(selector) => window.jQuery && window.jQuery(selector).trigger('keyup')""",
+                input_selector,
+            )
+
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            options = page.locator(option_selector).evaluate_all(
+                """els => els
+                    .filter(el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length))
+                    .map(el => (el.innerText || '').trim())"""
+            )
+            last_options = options
+            matched_text = expected_text if expected_text in options else ""
+            if not matched_text and input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
+                matched_text = next((option for option in options if option.startswith(expected_text)), "")
+            if not matched_text and allow_unique_prefix:
+                prefix_matches = [option for option in options if option.startswith(current_expected)]
+                if len(prefix_matches) == 1:
+                    matched_text = prefix_matches[0]
+                    logger.info("{}未找到精确候选：{}，改用 ERP 唯一候选：{}", field_name, expected_text, matched_text)
+                elif len(prefix_matches) > 1:
+                    raise RuntimeError(f"{field_name}匹配到多个候选：{expected_text}，兜底查询：{current_query}，候选：{prefix_matches}")
+            if matched_text:
+                page.evaluate(
+                    """({selector, text}) => {
+                        const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+                        const target = Array.from(document.querySelectorAll(selector))
+                            .filter(visible)
+                            .find(el => (el.innerText || '').trim() === text);
+                        target.click();
+                    }""",
+                    {"selector": option_selector, "text": matched_text},
+                )
+                page.locator(input_selector).wait_for(state="visible", timeout=5_000)
+                actual = page.locator(input_selector).input_value().strip()
+                if matched_text not in actual and actual not in matched_text:
+                    logger.warning("{}候选点击后输入框值与预期不同：actual={} expected={}", field_name, actual, matched_text)
+                return matched_text
+            page.wait_for_timeout(500)
+
     actual = page.locator(input_selector).input_value().strip()
-    if expected_text not in actual and actual not in expected_text:
-        logger.warning("{}候选点击后输入框值与预期不同：actual={} expected={}", field_name, actual, expected_text)
+    raise RuntimeError(f"{field_name}未找到候选：{expected_text}，输入框当前值：{actual}，当前候选：{last_options}")
 
 
 def _row_locator(page: Page, index: int):
@@ -152,6 +172,7 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
         sku.erp_model,
         sku.erp_model,
         "型号",
+        fallback_queries=[sku.erp_base_model] if sku.erp_base_model != sku.erp_model else None,
     )
     select_autocomplete_option(
         page,
