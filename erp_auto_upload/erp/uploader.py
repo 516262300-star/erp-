@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -451,6 +452,78 @@ def upload_sku_size_images(page: Page, sku_image_pairs: list[tuple[str, Path]]) 
         )
         close_upload_modal(page)
     logger.info("尺寸图上传完成：{} 张", len(sku_image_pairs))
+
+
+def main_model_key(value: str) -> str:
+    model = Path(str(value)).stem.split("_", 1)[0].split("#", 1)[0].split("-", 1)[0].strip()
+    match = re.match(r"\d+[A-Za-z]*", model)
+    return (match.group(0) if match else model).lower()
+
+
+def build_no_color_image_map(file_paths: list[Path]) -> dict[str, Path]:
+    image_map: dict[str, Path] = {}
+    for path in file_paths:
+        key = main_model_key(path.stem)
+        if not key:
+            logger.warning("无色图文件名无法识别主型号，跳过：{}", path.name)
+            continue
+        if key in image_map:
+            logger.warning("主型号 {} 匹配到多张无色图，仅使用第一张：{}，忽略 {}", key, image_map[key].name, path.name)
+            continue
+        image_map[key] = path
+    return image_map
+
+
+def upload_sku_no_color_images(page: Page, file_paths: list[Path]) -> None:
+    if not file_paths:
+        logger.info("无色图为空，跳过上传")
+        return
+    ensure_files_exist(file_paths)
+    image_map = build_no_color_image_map(file_paths)
+    if not image_map:
+        logger.warning("无色图文件夹未识别到可用主型号，跳过上传")
+        return
+
+    indexes = page.locator("td[index$='_无色.jpg']").evaluate_all(
+        "els => els.map(el => el.getAttribute('index')).filter(Boolean)"
+    )
+    if not indexes:
+        logger.warning("ERP 页面未找到无色图上传行，跳过无色图上传")
+        return
+
+    uploaded_count = 0
+    missing_keys: set[str] = set()
+    for index_value in indexes:
+        if not isinstance(index_value, str):
+            continue
+        key = main_model_key(index_value)
+        image_path = image_map.get(key)
+        if not image_path:
+            missing_keys.add(key)
+            continue
+
+        row = page.locator(f"td[index='{index_value}']").first
+        logger.info("上传无色图：{} -> {}", index_value, image_path.name)
+        row.locator("label.click2upload[for='jpg']").click()
+        page.locator("input#jpg[name='userfile']").set_input_files(str(image_path))
+        page.evaluate("() => window.jQuery && window.jQuery('#upload_file_form_jpg').submit()")
+        page.wait_for_function(
+            """(indexValue) => {
+                const cell = document.querySelector(`td[index="${indexValue}"]`);
+                if (!cell) return false;
+                const labelOk = (cell.innerText || '').includes('上传成功');
+                const img = cell.querySelector('img');
+                return labelOk && img && img.complete && img.naturalWidth > 0;
+            }""",
+            arg=index_value,
+            timeout=60_000,
+        )
+        close_upload_modal(page)
+        uploaded_count += 1
+
+    for key in sorted(missing_keys):
+        logger.warning("无色图缺失：主型号 {} 未在无色图文件夹中找到对应图片，已跳过该主型号", key)
+    logger.info("无色图上传完成：{} 个规格行", uploaded_count)
 
 
 def close_upload_modal(page: Page) -> None:

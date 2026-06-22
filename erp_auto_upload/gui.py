@@ -107,6 +107,7 @@ class UploadGui(tk.Tk):
             f"主图原图：{len(payload['main_original_images'])} 张",
             f"详情图：{len(payload['detail_images'])} 张",
             f"尺寸图 / SKU：{len(payload['size_images'])} 张",
+            f"无色图：{len(payload['no_color_images'])} 张",
             f"视频：{payload['video'] or '未匹配，跳过'}",
             "",
             "SKU 列表：",

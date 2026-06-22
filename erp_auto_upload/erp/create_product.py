@@ -8,7 +8,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 import selectors as sel
 from config import screenshot_path
 from erp.price_query import PriceQueryResult, query_price_and_spec_code
-from erp.uploader import upload_editor_images, upload_files, upload_gallery_files, upload_sku_size_images
+from erp.uploader import upload_editor_images, upload_files, upload_gallery_files, upload_sku_no_color_images, upload_sku_size_images
 from parser.folder_parser import MaterialBundle
 from parser.sku_parser import ParsedSku
 
@@ -290,6 +290,7 @@ def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[Price
             for result in resolved_results
         ],
     )
+    upload_sku_no_color_images(page, bundle.no_color_images)
     if bundle.video:
         upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "视频")
     else:

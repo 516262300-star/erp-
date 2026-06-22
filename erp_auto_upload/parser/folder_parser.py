@@ -23,6 +23,7 @@ class MaterialBundle:
     main_original_images: list[Path]
     detail_images: list[Path]
     size_images: list[Path]
+    no_color_images: list[Path]
     video: Path | None
     skus: list[ParsedSku]
 
@@ -163,6 +164,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
     )
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
+    no_color_dir = first_existing_dir(material_root / "无色图", material_root / "无色")
     video_dir = material_root / "视频"
 
     main_images = list_files(main_dir, IMAGE_EXTENSIONS)
@@ -171,6 +173,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
 
     main_original_images = list_files(main_original_dir, IMAGE_EXTENSIONS)
     detail_images = list_detail_images(detail_dir)
+    no_color_images = list_files(no_color_dir, IMAGE_EXTENSIONS)
     parsed_pairs = [(path, parse_sku_from_stem(path.stem, path)) for path in list_files(size_dir, IMAGE_EXTENSIONS)]
     parsed_pairs = sorted(parsed_pairs, key=lambda item: sku_order_key(item[1]))
     size_images = [path for path, _sku in parsed_pairs]
@@ -184,6 +187,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         main_original_images=main_original_images,
         detail_images=detail_images,
         size_images=size_images,
+        no_color_images=no_color_images,
         video=video,
         skus=skus,
     )

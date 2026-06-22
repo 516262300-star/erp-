@@ -31,6 +31,7 @@ def bundle_to_dict(bundle: MaterialBundle) -> dict[str, Any]:
         "main_original_images": [str(path) for path in bundle.main_original_images],
         "detail_images": [str(path) for path in bundle.detail_images],
         "size_images": [str(path) for path in bundle.size_images],
+        "no_color_images": [str(path) for path in bundle.no_color_images],
         "video": str(bundle.video) if bundle.video else None,
         "video_resolution": video_resolution,
         "skus": [path_to_str(asdict(sku)) for sku in bundle.skus],
