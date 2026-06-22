@@ -48,6 +48,31 @@ def first_existing_dir(*folders: Path) -> Path:
     return folders[0]
 
 
+def first_matching_child_dir(
+    parent: Path,
+    *names: str,
+    suffix: str | None = None,
+    exclude_keywords: tuple[str, ...] = (),
+) -> Path | None:
+    if not parent.exists():
+        return None
+    for name in names:
+        exact = parent / name
+        if exact.is_dir() and not any(keyword in exact.name for keyword in exclude_keywords):
+            return exact
+    candidates = [
+        path
+        for path in parent.iterdir()
+        if path.is_dir()
+        and not any(keyword in path.name for keyword in exclude_keywords)
+        and suffix is not None
+        and path.name.endswith(suffix)
+    ]
+    if not candidates:
+        return None
+    return sorted(candidates, key=natural_key)[0]
+
+
 def list_detail_images(detail_dir: Path) -> list[Path]:
     images = list_files(detail_dir, IMAGE_EXTENSIONS)
     if images:
@@ -113,11 +138,23 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
     if not material_root.is_dir():
         raise RuntimeError(f"MATERIAL_ROOT 不是目录：{material_root}")
 
-    main_dir = material_root / "主图"
+    main_dir = first_matching_child_dir(
+        material_root,
+        "主图",
+        suffix="主图",
+        exclude_keywords=("无logo", "无 logo", "原图"),
+    ) or material_root / "主图"
     main_original_dir = first_existing_dir(
         material_root / "无logo主图",
         material_root / "主图无logo",
         material_root / "无logo图",
+        material_root / "无 logo 图",
+        material_root / "原图",
+        main_dir / "无logo",
+        main_dir / "无 logo",
+        main_dir / "无logo图",
+        main_dir / "无 logo 图",
+        main_dir / "原图",
     )
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
@@ -125,7 +162,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
 
     main_images = list_files(main_dir, IMAGE_EXTENSIONS)
     if not main_images:
-        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图 为空")
+        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图 或以“主图”结尾的目录为空")
 
     main_original_images = list_files(main_original_dir, IMAGE_EXTENSIONS)
     detail_images = list_detail_images(detail_dir)
