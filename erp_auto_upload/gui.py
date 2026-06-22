@@ -50,6 +50,8 @@ class UploadGui(tk.Tk):
 
         self.parse_button = ttk.Button(button_frame, text="解析检查", command=self.parse_current_folder)
         self.parse_button.pack(side=tk.LEFT)
+        self.precheck_button = ttk.Button(button_frame, text="ERP核对", command=self.start_precheck)
+        self.precheck_button.pack(side=tk.LEFT, padx=(8, 0))
         self.upload_button = ttk.Button(button_frame, text="开始上架（不保存）", command=self.start_upload)
         self.upload_button.pack(side=tk.LEFT, padx=(8, 0))
         self.stop_button = ttk.Button(button_frame, text="停止脚本", command=self.stop_upload, state=tk.DISABLED)
@@ -117,8 +119,14 @@ class UploadGui(tk.Tk):
         self.status.set("解析完成，可以开始上架")
 
     def start_upload(self) -> None:
+        self._start_script("upload", "开始上架：会先核对 ERP 型号、颜色和成本；核对通过后继续填写上传。\n")
+
+    def start_precheck(self) -> None:
+        self._start_script("precheck", "开始 ERP 核对：只核对型号、颜色和成本，不填写、不上传。\n", extra_args=["--no-pause"])
+
+    def _start_script(self, command: str, log_message: str, extra_args: list[str] | None = None) -> None:
         if self.process and self.process.poll() is None:
-            messagebox.showwarning(APP_TITLE, "已有上架脚本正在运行")
+            messagebox.showwarning(APP_TITLE, "已有脚本正在运行")
             return
         path = self._get_material_path()
         if path is None:
@@ -129,12 +137,13 @@ class UploadGui(tk.Tk):
             messagebox.showerror(APP_TITLE, str(exc))
             return
 
-        self._append_log("开始上架：不自动保存，完成后浏览器会保持打开。\n")
+        self._append_log(log_message)
         script = Path(__file__).with_name("main.py")
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
+        args = [sys.executable, str(script), command, "--material-root", str(path), *(extra_args or [])]
         self.process = subprocess.Popen(
-            [sys.executable, str(script), "upload", "--material-root", str(path)],
+            args,
             cwd=str(Path(__file__).parent),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -143,7 +152,7 @@ class UploadGui(tk.Tk):
             errors="replace",
             env=env,
         )
-        self.status.set("上架脚本运行中")
+        self.status.set("脚本运行中")
         self._set_running(True)
         threading.Thread(target=self._read_process_output, daemon=True).start()
 
@@ -202,6 +211,7 @@ class UploadGui(tk.Tk):
 
     def _set_running(self, running: bool) -> None:
         self.upload_button.configure(state=tk.DISABLED if running else tk.NORMAL)
+        self.precheck_button.configure(state=tk.DISABLED if running else tk.NORMAL)
         self.parse_button.configure(state=tk.DISABLED if running else tk.NORMAL)
         self.stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
 

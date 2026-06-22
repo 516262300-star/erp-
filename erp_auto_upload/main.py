@@ -130,6 +130,39 @@ def cmd_price_query(material_root_arg: str | None) -> None:
         close_browser(playwright, browser, context)
 
 
+def precheck_result_to_dict(result) -> dict[str, Any]:
+    return {
+        "source_stem": result.sku.source_stem,
+        "parsed_erp_model": result.sku.erp_model,
+        "resolved_erp_model": result.resolved_erp_model,
+        "parsed_erp_color": result.sku.erp_color,
+        "resolved_erp_color": result.resolved_erp_color,
+        "display_name": result.sku.display_name,
+        "price": result.price,
+        "spec_code": result.spec_code,
+    }
+
+
+def cmd_precheck(material_root_arg: str | None, pause: bool) -> None:
+    from erp.create_product import open_create_product_page, precheck_skus
+    from erp.login import login
+
+    settings = load_settings()
+    bundle = parse_material_folder(resolve_material_root(material_root_arg))
+    login_url, username, password = settings.require_login()
+    playwright, browser, context, page = launch_page(headless=False)
+    try:
+        login(page, login_url, username, password)
+        open_create_product_page(page, settings.erp_home_url)
+        results = precheck_skus(page, bundle)
+        print(json.dumps([precheck_result_to_dict(result) for result in results], ensure_ascii=False, indent=2))
+        logger.info("ERP 核对完成：未填写标题，未新增 SKU，未上传素材")
+        if pause:
+            keep_browser_open(page)
+    finally:
+        close_browser(playwright, browser, context)
+
+
 def cmd_upload(save: bool, material_root_arg: str | None, pause: bool) -> None:
     from erp.create_product import create_product
     from erp.login import login
@@ -150,9 +183,8 @@ def cmd_upload(save: bool, material_root_arg: str | None, pause: bool) -> None:
 
 def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
     from config import screenshot_path
-    from erp.create_product import fill_link_title, fill_sku_row, open_create_product_page
+    from erp.create_product import fill_link_title, fill_skus_with_results, open_create_product_page, precheck_skus
     from erp.login import login
-    from erp.price_query import PriceQueryResult
     import selectors as sel
 
     settings = load_settings()
@@ -162,9 +194,9 @@ def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
     try:
         login(page, login_url, username, password)
         open_create_product_page(page, settings.erp_home_url)
+        sku_results = precheck_skus(page, bundle)
         fill_link_title(page, bundle.link_title)
-        for index, sku in enumerate(bundle.skus):
-            fill_sku_row(page, index, sku, PriceQueryResult(sku=sku, price="", spec_code=""))
+        fill_skus_with_results(page, sku_results)
 
         page.locator(sel.MAIN_IMAGE_UPLOAD_TRIGGER).set_input_files([str(path) for path in bundle.main_images])
         page.locator(sel.SIZE_IMAGE_UPLOAD_TRIGGER).set_input_files(str(bundle.size_images[0]) if bundle.size_images else [])
@@ -181,9 +213,8 @@ def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
 
 def cmd_upload_test(material_root_arg: str | None, pause: bool) -> None:
     from config import screenshot_path
-    from erp.create_product import fill_link_title, fill_sku_row, open_create_product_page, upload_materials
+    from erp.create_product import fill_link_title, fill_skus_with_results, open_create_product_page, precheck_skus, upload_materials
     from erp.login import login
-    from erp.price_query import PriceQueryResult
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
@@ -192,10 +223,10 @@ def cmd_upload_test(material_root_arg: str | None, pause: bool) -> None:
     try:
         login(page, login_url, username, password)
         open_create_product_page(page, settings.erp_home_url)
+        sku_results = precheck_skus(page, bundle)
         fill_link_title(page, bundle.link_title)
-        for index, sku in enumerate(bundle.skus):
-            fill_sku_row(page, index, sku, PriceQueryResult(sku=sku, price="", spec_code=""))
-        upload_materials(page, bundle)
+        fill_skus_with_results(page, sku_results)
+        upload_materials(page, bundle, sku_results)
         page.screenshot(path=str(screenshot_path("upload_test_done.png")), full_page=True)
         logger.info("上传测试已完成：未点击保存")
         if pause:
@@ -215,6 +246,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     price_parser = subparsers.add_parser("price-query", help="逐个 SKU 查价并输出价格/规格编码")
     price_parser.add_argument("--material-root", required=True, help="本次商品素材目录")
+
+    precheck_parser = subparsers.add_parser("precheck", help="上架前核对 ERP 型号、颜色和成本，不填写、不上传")
+    precheck_parser.add_argument("--material-root", required=True, help="本次商品素材目录")
+    precheck_parser.add_argument("--pause", dest="pause", action="store_true", help="核对完成后停在浏览器页面")
+    precheck_parser.add_argument("--no-pause", dest="pause", action="store_false", help="核对完成后自动关闭浏览器")
+    precheck_parser.set_defaults(pause=False)
 
     form_test_parser = subparsers.add_parser("form-test", help="安全测试：填写新增产品页表单，不提交上传，不保存")
     form_test_parser.add_argument("--material-root", required=True, help="本次商品素材目录")
@@ -246,6 +283,8 @@ def main() -> None:
         cmd_login()
     elif args.command == "price-query":
         cmd_price_query(args.material_root)
+    elif args.command == "precheck":
+        cmd_precheck(args.material_root, pause=args.pause)
     elif args.command == "form-test":
         cmd_form_test(args.material_root, pause=args.pause)
     elif args.command == "upload-test":

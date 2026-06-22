@@ -16,6 +16,16 @@ class PriceQueryResult:
     price: str
     spec_code: str
     raw: dict | None = None
+    erp_model: str | None = None
+    erp_color: str | None = None
+
+    @property
+    def resolved_erp_model(self) -> str:
+        return self.erp_model or self.sku.erp_model
+
+    @property
+    def resolved_erp_color(self) -> str:
+        return self.erp_color or self.sku.erp_color
 
 
 def _extract_json_payload(text: str) -> dict:

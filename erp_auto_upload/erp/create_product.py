@@ -155,9 +155,9 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
     logger.info(
         "填写 SKU 行 {}：erp_model={} erp_base_model={} erp_color={} display_name={} cost={}",
         index + 1,
-        sku.erp_model,
+        result.resolved_erp_model,
         sku.erp_base_model,
-        sku.erp_color,
+        result.resolved_erp_color,
         sku.display_name,
         result.price,
     )
@@ -169,17 +169,17 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
         page,
         sel.SKU_MODEL_INPUT_IN_ROW,
         sel.SKU_MODEL_DROPDOWN_OPTION,
-        sku.erp_model,
-        sku.erp_model,
+        result.resolved_erp_model,
+        result.resolved_erp_model,
         "型号",
-        fallback_queries=[sku.erp_base_model] if sku.erp_base_model != sku.erp_model else None,
+        fallback_queries=[sku.erp_base_model] if sku.erp_base_model != result.resolved_erp_model else None,
     )
     select_autocomplete_option(
         page,
         sel.SKU_COLOR_INPUT_IN_ROW,
         sel.SKU_COLOR_DROPDOWN_OPTION,
-        sku.erp_color,
-        sku.erp_color,
+        result.resolved_erp_color,
+        result.resolved_erp_color,
         "入库颜色",
     )
     page.locator(sel.SKU_DISPLAY_NAME_INPUT_IN_ROW).fill(sku.display_name)
@@ -202,15 +202,71 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
 
 
 def fill_skus(page: Page, bundle: MaterialBundle) -> list[PriceQueryResult]:
-    results: list[PriceQueryResult] = []
-    for index, sku in enumerate(bundle.skus):
-        result = query_price_and_spec_code(page, sku)
-        fill_sku_row(page, index, sku, result)
-        results.append(result)
+    results = precheck_skus(page, bundle)
+    fill_skus_with_results(page, results)
     return results
 
 
-def upload_materials(page: Page, bundle: MaterialBundle) -> None:
+def fill_skus_with_results(page: Page, results: list[PriceQueryResult]) -> None:
+    for index, result in enumerate(results):
+        fill_sku_row(page, index, result.sku, result)
+
+
+def precheck_skus(page: Page, bundle: MaterialBundle) -> list[PriceQueryResult]:
+    logger.info("开始 ERP 上架前核对：{} 个 SKU", len(bundle.skus))
+    results: list[PriceQueryResult] = []
+    errors: list[str] = []
+    for index, sku in enumerate(bundle.skus, start=1):
+        try:
+            price_result = query_price_and_spec_code(page, sku)
+            resolved_model = select_autocomplete_option(
+                page,
+                sel.SKU_MODEL_INPUT_IN_ROW,
+                sel.SKU_MODEL_DROPDOWN_OPTION,
+                sku.erp_model,
+                sku.erp_model,
+                "型号",
+                fallback_queries=[sku.erp_base_model] if sku.erp_base_model != sku.erp_model else None,
+            )
+            resolved_color = select_autocomplete_option(
+                page,
+                sel.SKU_COLOR_INPUT_IN_ROW,
+                sel.SKU_COLOR_DROPDOWN_OPTION,
+                sku.erp_color,
+                sku.erp_color,
+                "入库颜色",
+            )
+            result = PriceQueryResult(
+                sku=sku,
+                price=price_result.price,
+                spec_code=price_result.spec_code,
+                raw=price_result.raw,
+                erp_model=resolved_model,
+                erp_color=resolved_color,
+            )
+            logger.info(
+                "ERP 核对 {}：{} -> 型号 {} / 颜色 {} / 成本 {} / 外显 {}",
+                index,
+                sku.source_stem,
+                result.resolved_erp_model,
+                result.resolved_erp_color,
+                result.price,
+                sku.display_name,
+            )
+            results.append(result)
+        except Exception as exc:
+            message = f"{index}. {sku.source_stem}: {exc}"
+            logger.error("ERP 核对失败：{}", message)
+            errors.append(message)
+            page.keyboard.press("Escape")
+    if errors:
+        raise RuntimeError("ERP 上架前核对失败，已停止上架：\n" + "\n".join(errors))
+    logger.info("ERP 上架前核对通过：{} 个 SKU", len(results))
+    return results
+
+
+def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[PriceQueryResult] | None = None) -> None:
+    resolved_results = sku_results or [PriceQueryResult(sku=sku, price="", spec_code="") for sku in bundle.skus]
     upload_gallery_files(page, sel.MAIN_IMAGE_UPLOAD_TRIGGER, "images", bundle.main_images, "主图")
     upload_gallery_files(
         page,
@@ -229,7 +285,10 @@ def upload_materials(page: Page, bundle: MaterialBundle) -> None:
     )
     upload_sku_size_images(
         page,
-        [(f"{sku.erp_model}#{sku.erp_color}", sku.source_file) for sku in bundle.skus],
+        [
+            (f"{result.resolved_erp_model}#{result.resolved_erp_color}", result.sku.source_file)
+            for result in resolved_results
+        ],
     )
     if bundle.video:
         upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "视频")
@@ -239,9 +298,10 @@ def upload_materials(page: Page, bundle: MaterialBundle) -> None:
 
 def create_product(page: Page, bundle: MaterialBundle, home_url: str | None = None, save: bool = False) -> None:
     open_create_product_page(page, home_url)
+    sku_results = precheck_skus(page, bundle)
     fill_link_title(page, bundle.link_title)
-    fill_skus(page, bundle)
-    upload_materials(page, bundle)
+    fill_skus_with_results(page, sku_results)
+    upload_materials(page, bundle, sku_results)
     page.screenshot(path=str(screenshot_path("final_before_save.png")), full_page=True)
     logger.info("已完成上架信息填写，默认停在保存前")
 
