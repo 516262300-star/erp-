@@ -24,6 +24,7 @@ def path_to_str(value: Any) -> Any:
 
 def bundle_to_dict(bundle: MaterialBundle) -> dict[str, Any]:
     video_resolution = probe_video_resolution(bundle.video) if bundle.video else None
+    video_size_mb = round(bundle.video.stat().st_size / 1024 / 1024, 1) if bundle.video else None
     return {
         "material_root": str(bundle.material_root),
         "link_title": bundle.link_title,
@@ -33,6 +34,7 @@ def bundle_to_dict(bundle: MaterialBundle) -> dict[str, Any]:
         "size_images": [str(path) for path in bundle.size_images],
         "no_color_images": [str(path) for path in bundle.no_color_images],
         "video": str(bundle.video) if bundle.video else None,
+        "video_size_mb": video_size_mb,
         "video_resolution": video_resolution,
         "skus": [path_to_str(asdict(sku)) for sku in bundle.skus],
     }

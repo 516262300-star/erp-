@@ -101,6 +101,10 @@ class UploadGui(tk.Tk):
             return
 
         payload = bundle_to_dict(bundle)
+        video_summary = payload["video"] or "未匹配，跳过"
+        if payload["video_size_mb"] is not None:
+            video_summary = f"{video_summary}（{payload['video_size_mb']} MB）"
+
         lines = [
             f"链接标题：{payload['link_title']}",
             f"主图：{len(payload['main_images'])} 张",
@@ -108,7 +112,7 @@ class UploadGui(tk.Tk):
             f"详情图：{len(payload['detail_images'])} 张",
             f"尺寸图 / SKU：{len(payload['size_images'])} 张",
             f"无色图：{len(payload['no_color_images'])} 张",
-            f"视频：{payload['video'] or '未匹配，跳过'}",
+            f"视频：{video_summary}",
             "",
             "SKU 列表：",
         ]

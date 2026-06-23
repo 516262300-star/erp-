@@ -8,10 +8,17 @@ from loguru import logger
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 
+LARGE_VIDEO_WARNING_MB = 80
+
+
 def ensure_files_exist(file_paths: list[Path]) -> None:
     missing = [str(path) for path in file_paths if not path.exists()]
     if missing:
         raise RuntimeError(f"待上传文件不存在：{', '.join(missing)}")
+
+
+def file_size_mb(path: Path) -> float:
+    return round(path.stat().st_size / 1024 / 1024, 1)
 
 
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
@@ -22,13 +29,27 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         raise RuntimeError(f"{label}上传 selector 为空，请先补 selectors.py")
 
     ensure_files_exist(file_paths)
-    logger.info("开始上传{}：{} 个", label, len(file_paths))
+    logger.info("开始处理{}：{} 个", label, len(file_paths))
+    if label == "视频":
+        for path in file_paths:
+            size_mb = file_size_mb(path)
+            logger.info("视频文件：{}，大小 {} MB", path.name, size_mb)
+            if size_mb > LARGE_VIDEO_WARNING_MB:
+                logger.warning(
+                    "视频 {} 大小 {} MB，保存后如果 ERP 没有生成视频，优先压缩视频或检查服务器上传大小限制",
+                    path.name,
+                    size_mb,
+                )
 
     trigger = page.locator(trigger_selector)
     element_type = trigger.first.evaluate("(el) => el.tagName.toLowerCase() + ':' + (el.getAttribute('type') || '')")
     if element_type == "input:file":
         trigger.set_input_files([str(path) for path in file_paths])
-        logger.info("{}已写入文件框：{}", label, [path.name for path in file_paths])
+        selected_names = trigger.first.evaluate("el => Array.from(el.files || []).map(file => file.name)")
+        expected_names = [path.name for path in file_paths]
+        if selected_names != expected_names:
+            raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
+        logger.info("{}已挂载到文件框，将随保存商品提交：{}", label, selected_names)
         return
 
     with page.expect_file_chooser() as file_chooser_info:
