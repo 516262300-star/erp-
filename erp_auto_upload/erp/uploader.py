@@ -9,6 +9,8 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 
 LARGE_VIDEO_WARNING_MB = 80
+VIDEO_PROGRESS_APPEAR_TIMEOUT_MS = 8_000
+VIDEO_PROGRESS_TIMEOUT_MS = 15 * 60_000
 
 
 def ensure_files_exist(file_paths: list[Path]) -> None:
@@ -19,6 +21,93 @@ def ensure_files_exist(file_paths: list[Path]) -> None:
 
 def file_size_mb(path: Path) -> float:
     return round(path.stat().st_size / 1024 / 1024, 1)
+
+
+def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> None:
+    find_progress_dialog = """
+        () => {
+            const visible = el => !!(
+                el &&
+                (el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+            );
+            const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+            const candidates = Array.from(document.querySelectorAll(
+                ".modal, .modal-dialog, .layui-layer, .bootbox, [role='dialog'], body > div"
+            ));
+            return candidates.find(el => visible(el) && textOf(el).includes("上传进度")) || null;
+        }
+    """
+    try:
+        page.wait_for_function(find_progress_dialog, timeout=VIDEO_PROGRESS_APPEAR_TIMEOUT_MS)
+    except PlaywrightTimeoutError:
+        logger.info("未检测到视频上传进度弹窗，继续后续流程")
+        return
+
+    logger.info("检测到视频上传进度弹窗，等待上传完成")
+    page.wait_for_function(
+        """
+        () => {
+            const visible = el => !!(
+                el &&
+                (el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+            );
+            const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+            const candidates = Array.from(document.querySelectorAll(
+                ".modal, .modal-dialog, .layui-layer, .bootbox, [role='dialog'], body > div"
+            ));
+            const dialog = candidates.find(el => visible(el) && textOf(el).includes("上传进度"));
+            if (!dialog) return true;
+            const buttons = Array.from(dialog.querySelectorAll("button, input[type='button'], input[type='submit'], a"));
+            return buttons.some(el => {
+                const text = (el.value || el.innerText || el.textContent || "").trim();
+                return visible(el) && text === "确定" && !el.disabled && !el.classList.contains("disabled");
+            });
+        }
+        """,
+        timeout=timeout,
+    )
+    page.evaluate(
+        """
+        () => {
+            const visible = el => !!(
+                el &&
+                (el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+            );
+            const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+            const candidates = Array.from(document.querySelectorAll(
+                ".modal, .modal-dialog, .layui-layer, .bootbox, [role='dialog'], body > div"
+            ));
+            const dialog = candidates.find(el => visible(el) && textOf(el).includes("上传进度"));
+            if (!dialog) return;
+            const button = Array.from(dialog.querySelectorAll("button, input[type='button'], input[type='submit'], a"))
+                .find(el => {
+                    const text = (el.value || el.innerText || el.textContent || "").trim();
+                    return visible(el) && text === "确定" && !el.disabled && !el.classList.contains("disabled");
+                });
+            if (button) button.click();
+        }
+        """
+    )
+    try:
+        page.wait_for_function(
+            """
+            () => {
+                const visible = el => !!(
+                    el &&
+                    (el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+                );
+                const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+                const candidates = Array.from(document.querySelectorAll(
+                    ".modal, .modal-dialog, .layui-layer, .bootbox, [role='dialog'], body > div"
+                ));
+                return !candidates.some(el => visible(el) && textOf(el).includes("上传进度"));
+            }
+            """,
+            timeout=10_000,
+        )
+    except PlaywrightTimeoutError:
+        logger.warning("视频上传进度弹窗点击确定后仍未关闭，继续后续流程")
+    logger.info("视频上传进度已完成")
 
 
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
@@ -49,7 +138,11 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         expected_names = [path.name for path in file_paths]
         if selected_names != expected_names:
             raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
-        logger.info("{}已挂载到文件框，将随保存商品提交：{}", label, selected_names)
+        if label == "视频":
+            wait_for_video_progress_modal(page)
+            logger.info("{}上传完成：{}", label, selected_names)
+        else:
+            logger.info("{}已挂载到文件框，将随保存商品提交：{}", label, selected_names)
         return
 
     with page.expect_file_chooser() as file_chooser_info:
