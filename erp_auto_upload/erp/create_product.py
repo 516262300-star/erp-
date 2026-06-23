@@ -153,7 +153,7 @@ def _sku_form_state(page: Page) -> dict[str, str | int]:
     return state
 
 
-def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResult) -> None:
+def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResult) -> PriceQueryResult:
     logger.info(
         "填写 SKU 行 {}：erp_model={} erp_base_model={} erp_color={} display_name={} cost={}",
         index + 1,
@@ -167,7 +167,7 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
     _selector_required(sel.SKU_DISPLAY_NAME_INPUT_IN_ROW, "SKU_DISPLAY_NAME_INPUT_IN_ROW")
 
     before_count = page.locator("input[name='skulist[]']").count()
-    select_autocomplete_option(
+    resolved_model = select_autocomplete_option(
         page,
         sel.SKU_MODEL_INPUT_IN_ROW,
         sel.SKU_MODEL_DROPDOWN_OPTION,
@@ -176,7 +176,7 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
         "型号",
         fallback_queries=[sku.erp_base_model] if sku.erp_base_model != result.resolved_erp_model else None,
     )
-    select_autocomplete_option(
+    resolved_color = select_autocomplete_option(
         page,
         sel.SKU_COLOR_INPUT_IN_ROW,
         sel.SKU_COLOR_DROPDOWN_OPTION,
@@ -202,16 +202,31 @@ def fill_sku_row(page: Page, index: int, sku: ParsedSku, result: PriceQueryResul
         page.screenshot(path=str(screenshot_path(f"sku_add_failed_{index + 1}.png")), full_page=True)
         raise RuntimeError(f"SKU 行 {index + 1} 添加失败：{sku.display_name}")
 
+    return PriceQueryResult(
+        sku=sku,
+        price=result.price,
+        spec_code=result.spec_code,
+        raw=result.raw,
+        erp_model=resolved_model,
+        erp_color=resolved_color,
+    )
+
 
 def fill_skus(page: Page, bundle: MaterialBundle) -> list[PriceQueryResult]:
-    results = precheck_skus(page, bundle)
-    fill_skus_with_results(page, results)
+    logger.info("开始填写 SKU：{} 个 SKU；仅在型号没有精确候选时启用 ERP 唯一候选兜底", len(bundle.skus))
+    results: list[PriceQueryResult] = []
+    for index, sku in enumerate(bundle.skus):
+        result = PriceQueryResult(sku=sku, price="", spec_code="")
+        results.append(fill_sku_row(page, index, sku, result))
+    logger.info("SKU 填写完成：{} 个 SKU", len(results))
     return results
 
 
-def fill_skus_with_results(page: Page, results: list[PriceQueryResult]) -> None:
+def fill_skus_with_results(page: Page, results: list[PriceQueryResult]) -> list[PriceQueryResult]:
+    resolved_results: list[PriceQueryResult] = []
     for index, result in enumerate(results):
-        fill_sku_row(page, index, result.sku, result)
+        resolved_results.append(fill_sku_row(page, index, result.sku, result))
+    return resolved_results
 
 
 def precheck_skus(page: Page, bundle: MaterialBundle) -> list[PriceQueryResult]:
@@ -301,9 +316,8 @@ def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[Price
 
 def create_product(page: Page, bundle: MaterialBundle, home_url: str | None = None, save: bool = False) -> None:
     open_create_product_page(page, home_url)
-    sku_results = precheck_skus(page, bundle)
     fill_link_title(page, bundle.link_title)
-    fill_skus_with_results(page, sku_results)
+    sku_results = fill_skus(page, bundle)
     upload_materials(page, bundle, sku_results)
     page.screenshot(path=str(screenshot_path("final_before_save.png")), full_page=True)
     logger.info("已完成上架信息填写，默认停在保存前")

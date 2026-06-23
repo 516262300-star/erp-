@@ -120,7 +120,7 @@ class UploadGui(tk.Tk):
         self.status.set("解析完成，可以开始上架")
 
     def start_upload(self) -> None:
-        self._start_script("upload", "开始上架：会先核对 ERP 型号、颜色和成本；核对通过后继续填写上传。\n")
+        self._start_script("upload", "开始上架：直接填写上传；只有型号没有精确候选时才用 ERP 唯一候选兜底。\n")
 
     def start_precheck(self) -> None:
         self._start_script("precheck", "开始 ERP 核对：只核对型号、颜色和成本，不填写、不上传。\n", extra_args=["--no-pause"])

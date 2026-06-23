@@ -184,7 +184,7 @@ def cmd_upload(save: bool, material_root_arg: str | None, pause: bool) -> None:
 
 def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
     from config import screenshot_path
-    from erp.create_product import fill_link_title, fill_skus_with_results, open_create_product_page, precheck_skus
+    from erp.create_product import fill_link_title, fill_skus, open_create_product_page
     from erp.login import login
     import selectors as sel
 
@@ -195,9 +195,8 @@ def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
     try:
         login(page, login_url, username, password)
         open_create_product_page(page, settings.erp_home_url)
-        sku_results = precheck_skus(page, bundle)
         fill_link_title(page, bundle.link_title)
-        fill_skus_with_results(page, sku_results)
+        fill_skus(page, bundle)
 
         page.locator(sel.MAIN_IMAGE_UPLOAD_TRIGGER).set_input_files([str(path) for path in bundle.main_images])
         page.locator(sel.SIZE_IMAGE_UPLOAD_TRIGGER).set_input_files(str(bundle.size_images[0]) if bundle.size_images else [])
@@ -214,7 +213,7 @@ def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
 
 def cmd_upload_test(material_root_arg: str | None, pause: bool) -> None:
     from config import screenshot_path
-    from erp.create_product import fill_link_title, fill_skus_with_results, open_create_product_page, precheck_skus, upload_materials
+    from erp.create_product import fill_link_title, fill_skus, open_create_product_page, upload_materials
     from erp.login import login
 
     settings = load_settings()
@@ -224,9 +223,8 @@ def cmd_upload_test(material_root_arg: str | None, pause: bool) -> None:
     try:
         login(page, login_url, username, password)
         open_create_product_page(page, settings.erp_home_url)
-        sku_results = precheck_skus(page, bundle)
         fill_link_title(page, bundle.link_title)
-        fill_skus_with_results(page, sku_results)
+        sku_results = fill_skus(page, bundle)
         upload_materials(page, bundle, sku_results)
         page.screenshot(path=str(screenshot_path("upload_test_done.png")), full_page=True)
         logger.info("上传测试已完成：未点击保存")
