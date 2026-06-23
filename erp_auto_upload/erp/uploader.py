@@ -43,7 +43,7 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
         logger.info("未检测到视频上传进度弹窗，继续后续流程")
         return
 
-    logger.info("检测到视频上传进度弹窗，等待上传完成")
+    logger.info("检测到视频上传进度弹窗，等待出现上传成功")
     page.wait_for_function(
         """
         () => {
@@ -56,7 +56,8 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
                 ".modal, .modal-dialog, .layui-layer, .bootbox, [role='dialog'], body > div"
             ));
             const dialog = candidates.find(el => visible(el) && textOf(el).includes("上传进度"));
-            if (!dialog) return true;
+            if (!dialog) return false;
+            if (!textOf(dialog).includes("上传成功")) return false;
             const buttons = Array.from(dialog.querySelectorAll("button, input[type='button'], input[type='submit'], a"));
             return buttons.some(el => {
                 const text = (el.value || el.innerText || el.textContent || "").trim();
@@ -79,6 +80,9 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
             ));
             const dialog = candidates.find(el => visible(el) && textOf(el).includes("上传进度"));
             if (!dialog) return;
+            if (!textOf(dialog).includes("上传成功")) {
+                throw new Error("视频上传进度弹窗尚未显示上传成功");
+            }
             const button = Array.from(dialog.querySelectorAll("button, input[type='button'], input[type='submit'], a"))
                 .find(el => {
                     const text = (el.value || el.innerText || el.textContent || "").trim();
@@ -107,7 +111,7 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
         )
     except PlaywrightTimeoutError:
         logger.warning("视频上传进度弹窗点击确定后仍未关闭，继续后续流程")
-    logger.info("视频上传进度已完成")
+    logger.info("视频上传成功，已确认上传进度弹窗")
 
 
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
