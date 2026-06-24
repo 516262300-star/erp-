@@ -28,9 +28,10 @@ class MaterialBundle:
     skus: list[ParsedSku]
 
 
-def natural_key(path: Path) -> list[object]:
+def natural_key(path: Path) -> list[tuple[int, int | str]]:
     text = path.name.lower()
-    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text)]
+    parts = [part for part in re.split(r"\s*(\d+)\s*", text) if part]
+    return [(1, int(part)) if part.isdigit() else (0, part) for part in parts]
 
 
 def list_files(folder: Path, extensions: set[str]) -> list[Path]:
@@ -91,7 +92,7 @@ def pick_video(video_dir: Path) -> Path | None:
     return max(matched, key=lambda path: path.stat().st_mtime)
 
 
-def sku_order_key(sku: ParsedSku) -> tuple[int, list[object]]:
+def sku_order_key(sku: ParsedSku) -> tuple[int, list[tuple[int, int | str]]]:
     numeric_sizes: list[int] = []
     for part in sku.erp_model.split("-")[1:]:
         if part.isdigit():

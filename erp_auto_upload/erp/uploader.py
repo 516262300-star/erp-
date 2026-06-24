@@ -65,6 +65,24 @@ def describe_upload_controls(page: Page) -> list[str]:
     )
 
 
+def _is_file_input(locator) -> bool:
+    return locator.evaluate("el => el.matches(\"input[type='file']\")")
+
+
+def _resolve_video_file_input(page: Page, trigger_selector: str):
+    trigger = page.locator(trigger_selector)
+    if trigger.count() > 0 and _is_file_input(trigger.first):
+        return trigger.first, trigger_selector
+
+    for fallback_selector in VIDEO_UPLOAD_FALLBACK_SELECTORS:
+        fallback = page.locator(fallback_selector)
+        if fallback.count() > 0 and _is_file_input(fallback.first):
+            logger.warning("视频上传控件未匹配默认文件框：{}，改用兜底 selector：{}", trigger_selector, fallback_selector)
+            return fallback.first, fallback_selector
+
+    return None, ""
+
+
 def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> None:
     find_progress_dialog = """
         () => {
@@ -176,16 +194,26 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
                     size_mb,
                 )
 
+    if label == "视频":
+        file_input, effective_selector = _resolve_video_file_input(page, trigger_selector)
+        if file_input is None:
+            controls = describe_upload_controls(page)
+            raise RuntimeError(
+                f"{label}上传文件框未找到：selector={trigger_selector}。"
+                f"页面上可见/相关上传控件：{controls or '未发现 input[type=file] 或上传按钮'}"
+            )
+        file_input.set_input_files([str(path) for path in file_paths])
+        selected_names = file_input.evaluate("el => Array.from(el.files || []).map(file => file.name)")
+        expected_names = [path.name for path in file_paths]
+        if selected_names != expected_names:
+            raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
+        logger.info("视频已挂载到文件框：{}，selector={}", selected_names, effective_selector)
+        wait_for_video_progress_modal(page)
+        logger.info("{}上传完成：{}", label, selected_names)
+        return
+
     trigger = page.locator(trigger_selector)
     effective_selector = trigger_selector
-    if trigger.count() == 0 and label == "视频":
-        for fallback_selector in VIDEO_UPLOAD_FALLBACK_SELECTORS:
-            fallback = page.locator(fallback_selector)
-            if fallback.count() > 0:
-                logger.warning("视频上传控件未匹配默认 selector：{}，改用兜底 selector：{}", trigger_selector, fallback_selector)
-                trigger = fallback
-                effective_selector = fallback_selector
-                break
     if trigger.count() == 0:
         controls = describe_upload_controls(page)
         raise RuntimeError(
