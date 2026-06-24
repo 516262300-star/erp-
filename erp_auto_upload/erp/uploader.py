@@ -11,6 +11,15 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 LARGE_VIDEO_WARNING_MB = 80
 VIDEO_PROGRESS_APPEAR_TIMEOUT_MS = 8_000
 VIDEO_PROGRESS_TIMEOUT_MS = 15 * 60_000
+VIDEO_UPLOAD_FALLBACK_SELECTORS = [
+    "input[type='file'][name='litpic']",
+    "input[type='file'][name='litpic[]']",
+    "input[type='file'][id*='file_upload'][name*='litpic']",
+    "input[type='file'][accept*='video']",
+    "input[type='file'][id*='video' i]",
+    "input[type='file'][name*='video' i]",
+    "input[type='file'][class*='video' i]",
+]
 
 
 def ensure_files_exist(file_paths: list[Path]) -> None:
@@ -21,6 +30,39 @@ def ensure_files_exist(file_paths: list[Path]) -> None:
 
 def file_size_mb(path: Path) -> float:
     return round(path.stat().st_size / 1024 / 1024, 1)
+
+
+def describe_upload_controls(page: Page) -> list[str]:
+    return page.evaluate(
+        """
+        () => Array.from(document.querySelectorAll("input[type='file'], i.uppic, button, a"))
+            .map((el) => {
+                const rect = el.getBoundingClientRect();
+                const visible = !!(rect.width || rect.height || el.getClientRects().length);
+                const text = (el.value || el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+                return {
+                    tag: el.tagName.toLowerCase(),
+                    type: el.getAttribute("type") || "",
+                    id: el.id || "",
+                    name: el.getAttribute("name") || "",
+                    className: typeof el.className === "string" ? el.className : "",
+                    text,
+                    visible,
+                };
+            })
+            .filter((item) => {
+                const haystack = `${item.id} ${item.name} ${item.className} ${item.text}`;
+                return item.tag === "input" || /upload|file|pic|图|视频|上传|uppic|litpic/i.test(haystack);
+            })
+            .slice(0, 40)
+            .map((item) => `${item.tag}${item.type ? `[type=${item.type}]` : ""}`
+                + `${item.id ? `#${item.id}` : ""}`
+                + `${item.name ? `[name=${item.name}]` : ""}`
+                + `${item.className ? `.${item.className.replace(/\\s+/g, ".")}` : ""}`
+                + `${item.text ? ` text=${item.text}` : ""}`
+                + ` visible=${item.visible}`);
+        """
+    )
 
 
 def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> None:
@@ -135,10 +177,26 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
                 )
 
     trigger = page.locator(trigger_selector)
+    effective_selector = trigger_selector
+    if trigger.count() == 0 and label == "视频":
+        for fallback_selector in VIDEO_UPLOAD_FALLBACK_SELECTORS:
+            fallback = page.locator(fallback_selector)
+            if fallback.count() > 0:
+                logger.warning("视频上传控件未匹配默认 selector：{}，改用兜底 selector：{}", trigger_selector, fallback_selector)
+                trigger = fallback
+                effective_selector = fallback_selector
+                break
+    if trigger.count() == 0:
+        controls = describe_upload_controls(page)
+        raise RuntimeError(
+            f"{label}上传控件未找到：selector={trigger_selector}。"
+            f"页面上可见/相关上传控件：{controls or '未发现 input[type=file] 或上传按钮'}"
+    )
     element_type = trigger.first.evaluate("(el) => el.tagName.toLowerCase() + ':' + (el.getAttribute('type') || '')")
     if element_type == "input:file":
-        trigger.set_input_files([str(path) for path in file_paths])
-        selected_names = trigger.first.evaluate("el => Array.from(el.files || []).map(file => file.name)")
+        file_input = trigger.first
+        file_input.set_input_files([str(path) for path in file_paths])
+        selected_names = file_input.evaluate("el => Array.from(el.files || []).map(file => file.name)")
         expected_names = [path.name for path in file_paths]
         if selected_names != expected_names:
             raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
@@ -150,7 +208,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         return
 
     with page.expect_file_chooser() as file_chooser_info:
-        page.locator(trigger_selector).click()
+        page.locator(effective_selector).first.click()
     file_chooser = file_chooser_info.value
     file_chooser.set_files([str(path) for path in file_paths])
     logger.info("{}已选择文件：{}", label, [path.name for path in file_paths])

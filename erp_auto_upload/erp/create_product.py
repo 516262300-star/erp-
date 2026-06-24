@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from typing import TypeVar
 
 from loguru import logger
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -13,9 +15,28 @@ from parser.folder_parser import MaterialBundle
 from parser.sku_parser import ParsedSku
 
 
+T = TypeVar("T")
+
+
 def _selector_required(selector: str, name: str) -> None:
     if not selector:
         raise RuntimeError(f"{name} selector 为空，请先补 selectors.py")
+
+
+def _run_product_step(page: Page, step_name: str, screenshot_stem: str, action: Callable[[], T]) -> T:
+    logger.info("开始步骤：{}", step_name)
+    try:
+        result = action()
+    except Exception as exc:
+        screenshot = screenshot_path(f"failed_{screenshot_stem}.png")
+        try:
+            page.screenshot(path=str(screenshot), full_page=True)
+            screenshot_message = f"失败截图：{screenshot}"
+        except Exception as screenshot_exc:
+            screenshot_message = f"失败截图保存失败：{screenshot_exc}"
+        raise RuntimeError(f"失败位置：{step_name}；{screenshot_message}；原因：{exc}") from exc
+    logger.info("步骤完成：{}", step_name)
+    return result
 
 
 def open_create_product_page(page: Page, home_url: str | None = None) -> None:
@@ -284,49 +305,82 @@ def precheck_skus(page: Page, bundle: MaterialBundle) -> list[PriceQueryResult]:
 
 def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[PriceQueryResult] | None = None) -> None:
     resolved_results = sku_results or [PriceQueryResult(sku=sku, price="", spec_code="") for sku in bundle.skus]
-    upload_gallery_files(page, sel.MAIN_IMAGE_UPLOAD_TRIGGER, "images", bundle.main_images, "主图")
-    upload_gallery_files(
+    _run_product_step(
         page,
-        sel.MAIN_ORIGINAL_IMAGE_UPLOAD_TRIGGER,
-        "images_photoes",
-        bundle.main_original_images,
-        "主图原图",
+        "上传主图",
+        "upload_main_images",
+        lambda: upload_gallery_files(page, sel.MAIN_IMAGE_UPLOAD_TRIGGER, "images", bundle.main_images, "主图"),
     )
-    upload_editor_images(
+    _run_product_step(
         page,
-        sel.DETAIL_EDITOR_GROUP_IMAGE_BUTTON,
-        sel.DETAIL_EDITOR_UPLOAD_IMAGE_BUTTON,
-        sel.DETAIL_EDITOR_BODY_TEXTAREA,
-        sel.DETAIL_EDITOR_CONTENT_AREA,
-        bundle.detail_images,
+        "上传主图原图",
+        "upload_main_original_images",
+        lambda: upload_gallery_files(
+            page,
+            sel.MAIN_ORIGINAL_IMAGE_UPLOAD_TRIGGER,
+            "images_photoes",
+            bundle.main_original_images,
+            "主图原图",
+        ),
     )
-    upload_sku_size_images(
+    _run_product_step(
         page,
-        [
-            (f"{result.resolved_erp_model}#{result.resolved_erp_color}", result.sku.source_file)
-            for result in resolved_results
-        ],
+        "上传详情图",
+        "upload_detail_images",
+        lambda: upload_editor_images(
+            page,
+            sel.DETAIL_EDITOR_GROUP_IMAGE_BUTTON,
+            sel.DETAIL_EDITOR_UPLOAD_IMAGE_BUTTON,
+            sel.DETAIL_EDITOR_BODY_TEXTAREA,
+            sel.DETAIL_EDITOR_CONTENT_AREA,
+            bundle.detail_images,
+        ),
     )
-    upload_sku_no_color_images(page, bundle.no_color_images)
+    _run_product_step(
+        page,
+        "上传尺寸图",
+        "upload_size_images",
+        lambda: upload_sku_size_images(
+            page,
+            [
+                (f"{result.resolved_erp_model}#{result.resolved_erp_color}", result.sku.source_file)
+                for result in resolved_results
+            ],
+        ),
+    )
+    _run_product_step(
+        page,
+        "上传无色图",
+        "upload_no_color_images",
+        lambda: upload_sku_no_color_images(page, bundle.no_color_images),
+    )
     if bundle.video:
-        upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "视频")
+        _run_product_step(
+            page,
+            "上传视频",
+            "upload_video",
+            lambda: upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "视频"),
+        )
     else:
         logger.warning("未找到符合规则的视频，跳过视频上传")
 
 
 def create_product(page: Page, bundle: MaterialBundle, home_url: str | None = None, save: bool = False) -> None:
-    open_create_product_page(page, home_url)
-    fill_link_title(page, bundle.link_title)
-    sku_results = fill_skus(page, bundle)
+    _run_product_step(page, "打开新建商品页", "open_create_product_page", lambda: open_create_product_page(page, home_url))
+    _run_product_step(page, "填写链接标题", "fill_link_title", lambda: fill_link_title(page, bundle.link_title))
+    sku_results = _run_product_step(page, "填写 SKU", "fill_skus", lambda: fill_skus(page, bundle))
     upload_materials(page, bundle, sku_results)
     page.screenshot(path=str(screenshot_path("final_before_save.png")), full_page=True)
     logger.info("已完成上架信息填写，默认停在保存前")
 
     if save:
-        _selector_required(sel.SAVE_BUTTON, "SAVE_BUTTON")
-        logger.info("点击保存按钮")
-        page.locator(sel.SAVE_BUTTON).click()
-        # TODO(selector): 将 SAVE_SUCCESS_MARKER 改为保存成功提示或状态。
-        page.locator(sel.SAVE_SUCCESS_MARKER).wait_for(state="visible", timeout=30_000)
-        page.screenshot(path=str(screenshot_path("save_success.png")), full_page=True)
-        logger.info("商品保存完成")
+        def save_product() -> None:
+            _selector_required(sel.SAVE_BUTTON, "SAVE_BUTTON")
+            logger.info("点击保存按钮")
+            page.locator(sel.SAVE_BUTTON).click()
+            # TODO(selector): 将 SAVE_SUCCESS_MARKER 改为保存成功提示或状态。
+            page.locator(sel.SAVE_SUCCESS_MARKER).wait_for(state="visible", timeout=30_000)
+            page.screenshot(path=str(screenshot_path("save_success.png")), full_page=True)
+            logger.info("商品保存完成")
+
+        _run_product_step(page, "保存商品", "save_product", save_product)

@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from config import load_settings, setup_logging
+from config import load_settings, screenshot_path, setup_logging
 from parser.folder_parser import MaterialBundle, parse_material_folder, probe_video_resolution
 
 
@@ -180,6 +180,17 @@ def cmd_upload(save: bool, material_root_arg: str | None, pause: bool) -> None:
         logger.info("流程完成")
         if pause:
             keep_browser_open(page)
+    except Exception as exc:
+        logger.exception("自动上架失败：{}", exc)
+        try:
+            screenshot = screenshot_path("failed_upload_command.png")
+            page.screenshot(path=str(screenshot), full_page=True)
+            logger.error("自动上架失败截图：{}", screenshot)
+        except Exception as screenshot_exc:
+            logger.warning("自动上架失败截图保存失败：{}", screenshot_exc)
+        logger.error("自动上架失败，浏览器已停在失败现场；确认页面后可关闭浏览器或点击 GUI 的“停止脚本”。")
+        keep_browser_open(page)
+        raise
     finally:
         close_browser(playwright, browser, context)
 
