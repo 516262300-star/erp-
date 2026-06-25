@@ -102,7 +102,7 @@ def select_autocomplete_option(
                 input_selector,
             )
 
-        wait_seconds = 3 if has_fallback and not allow_unique_prefix else 20
+        wait_seconds = 8 if has_fallback and not allow_unique_prefix else 20
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             options = page.locator(option_selector).evaluate_all(

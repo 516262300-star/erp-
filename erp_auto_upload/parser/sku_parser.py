@@ -122,7 +122,7 @@ def parse_sku_from_stem(stem: str, source_file: Path | None = None) -> ParsedSku
     erp_base_model = strip_series_name(model_name_parts[0])
     model_parts: list[str] = [erp_base_model]
     model_parts.extend(part for part in model_name_parts[1:] if part)
-    for idx, part in enumerate(parts[1:], start=1):
+    for idx, part in enumerate(parts[color_idx + 1 :], start=color_idx + 1):
         if idx == color_idx:
             continue
         cleaned = strip_parenthetical_note(part)
