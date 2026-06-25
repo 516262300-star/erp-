@@ -92,14 +92,14 @@ def pick_video(video_dir: Path) -> Path | None:
     return max(matched, key=lambda path: path.stat().st_mtime)
 
 
-def sku_order_key(sku: ParsedSku) -> tuple[int, list[tuple[int, int | str]]]:
+def sku_order_key(sku: ParsedSku) -> tuple[list[tuple[int, int | str]], int, list[tuple[int, int | str]]]:
     numeric_sizes: list[int] = []
     for part in sku.erp_model.split("-")[1:]:
-        if part.isdigit():
-            numeric_sizes.append(int(part))
-    if numeric_sizes:
-        return min(numeric_sizes), natural_key(sku.source_file)
-    return 10**9, natural_key(sku.source_file)
+        match = re.search(r"\d+", part)
+        if match:
+            numeric_sizes.append(int(match.group(0)))
+    size_order = min(numeric_sizes) if numeric_sizes else 10**9
+    return natural_key(Path(sku.erp_base_model)), size_order, natural_key(sku.source_file)
 
 
 def probe_video_resolution(video_path: Path) -> tuple[int, int] | None:
