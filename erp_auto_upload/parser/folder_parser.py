@@ -13,7 +13,8 @@ from parser.sku_parser import ParsedSku, parse_sku_from_stem
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4"}
 VIDEO_KEYWORDS = ("1:1", "1：1", "1-1", "800")
-IGNORED_MAIN_IMAGE_DIR_NAMES = {"B类主图", "B 类主图", "无牛皮癣图"}
+MAIN_IMAGE_EXCLUDE_KEYWORDS = ("无牛皮癣", "无皮癣")
+MAIN_IMAGE_EXCLUDE_PATTERNS = (r"c\s*类\s*主图",)
 
 
 @dataclass(frozen=True)
@@ -84,15 +85,59 @@ def list_detail_images(detail_dir: Path) -> list[Path]:
     return list_files(detail_dir, IMAGE_EXTENSIONS)
 
 
+def is_main_image_excluded(path: Path) -> bool:
+    text = " ".join(part.lower() for part in path.parts)
+    if any(keyword.lower() in text for keyword in MAIN_IMAGE_EXCLUDE_KEYWORDS):
+        return True
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in MAIN_IMAGE_EXCLUDE_PATTERNS)
+
+
+def list_filtered_main_images(folder: Path) -> list[Path]:
+    images = list_files(folder, IMAGE_EXTENSIONS)
+    skipped = [path.name for path in images if is_main_image_excluded(path)]
+    if skipped:
+        logger.info("主图中检测到不上传图片，已跳过：{}", skipped)
+    return [path for path in images if not is_main_image_excluded(path)]
+
+
+def list_root_main_images(material_root: Path) -> list[Path]:
+    images = [path for path in list_filtered_main_images(material_root) if "主图" in path.stem]
+    if images:
+        logger.info("使用素材根目录顶层主图文件：{}", [path.name for path in images])
+    return images
+
+
+def candidate_main_dirs(material_root: Path) -> list[Path]:
+    candidates = [material_root / "主图", material_root / "1920主图"]
+    if material_root.exists():
+        candidates.extend(
+            path
+            for path in sorted(material_root.iterdir(), key=natural_key)
+            if path.is_dir()
+            and path.name.endswith("主图")
+            and "无logo" not in path.name
+            and "无 logo" not in path.name
+            and "原图" not in path.name
+            and path not in candidates
+        )
+    return candidates
+
+
 def list_main_images(main_dir: Path) -> list[Path]:
-    ignored_dirs = (
-        [path.name for path in main_dir.iterdir() if path.is_dir() and path.name in IGNORED_MAIN_IMAGE_DIR_NAMES]
-        if main_dir.exists()
-        else []
-    )
-    if ignored_dirs:
-        logger.info("主图目录中检测到不上传子目录，已跳过：{}", ignored_dirs)
-    return list_files(main_dir, IMAGE_EXTENSIONS)
+    return list_filtered_main_images(main_dir)
+
+
+def resolve_main_images(material_root: Path) -> tuple[Path, list[Path]]:
+    root_images = list_root_main_images(material_root)
+    if root_images:
+        return material_root, root_images
+
+    for candidate in candidate_main_dirs(material_root):
+        images = list_main_images(candidate)
+        if images:
+            return candidate, images
+
+    return material_root / "主图", []
 
 
 def pick_video(video_dir: Path) -> Path | None:
@@ -152,16 +197,33 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
     if not material_root.is_dir():
         raise RuntimeError(f"MATERIAL_ROOT 不是目录：{material_root}")
 
-    main_dir = material_root / "主图"
+    main_dir, main_images = resolve_main_images(material_root)
+    main_original_dir = first_existing_dir(
+        main_dir / "无logo主图",
+        main_dir / "主图无logo",
+        main_dir / "无logo图",
+        main_dir / "无 logo 图",
+        main_dir / "去logo主图",
+        main_dir / "去 logo 主图",
+        main_dir / "无logo",
+        main_dir / "无 logo",
+        main_dir / "原图",
+        material_root / "无logo主图",
+        material_root / "主图无logo",
+        material_root / "无logo图",
+        material_root / "无 logo 图",
+        material_root / "去logo主图",
+        material_root / "去 logo 主图",
+    )
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
     no_color_dir = first_existing_dir(material_root / "无色图", material_root / "无色")
     video_dir = material_root / "视频"
 
-    main_images = list_main_images(main_dir)
     if not main_images:
-        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图 目录为空或不存在")
+        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图、MATERIAL_ROOT/1920主图 或素材根目录顶层主图为空")
 
+    main_original_images = list_files(main_original_dir, IMAGE_EXTENSIONS)
     detail_images = list_detail_images(detail_dir)
     no_color_images = list_files(no_color_dir, IMAGE_EXTENSIONS)
     parsed_pairs = [(path, parse_sku_from_stem(path.stem, path)) for path in list_files(size_dir, IMAGE_EXTENSIONS)]
@@ -174,7 +236,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         material_root=material_root,
         link_title=material_root.name,
         main_images=main_images,
-        main_original_images=[],
+        main_original_images=main_original_images,
         detail_images=detail_images,
         size_images=size_images,
         no_color_images=no_color_images,

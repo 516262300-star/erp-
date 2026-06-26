@@ -108,6 +108,7 @@ class UploadGui(tk.Tk):
         lines = [
             f"链接标题：{payload['link_title']}",
             f"主图：{len(payload['main_images'])} 张",
+            f"主图原图：{len(payload['main_original_images'])} 张",
             f"详情图：{len(payload['detail_images'])} 张",
             f"尺寸图 / SKU：{len(payload['size_images'])} 张",
             f"无色图：{len(payload['no_color_images'])} 张",

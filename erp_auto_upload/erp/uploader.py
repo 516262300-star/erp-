@@ -297,7 +297,7 @@ def upload_gallery_files(page: Page, icon_selector: str, input_name: str, file_p
         return
     ensure_files_exist(file_paths)
     clear_gallery_files(page, input_name, label, icon_selector)
-    before_count = page.locator(f"input[name='{input_name}[]']").count()
+    expected_count = len(file_paths)
     logger.info("开始上传{}：{} 个", label, len(file_paths))
     reset_shared_upload_dialog(page)
     page.locator(icon_selector).click()
@@ -305,13 +305,13 @@ def upload_gallery_files(page: Page, icon_selector: str, input_name: str, file_p
     page.evaluate("() => window.jQuery && window.jQuery('#upload_file_form').submit()")
     page.wait_for_function(
         """({name, expected}) => document.querySelectorAll(`input[name="${name}[]"]`).length >= expected""",
-        arg={"name": input_name, "expected": before_count + len(file_paths)},
+        arg={"name": input_name, "expected": expected_count},
         timeout=120_000,
     )
     wait_for_gallery_settle(page, input_name)
     close_upload_modal(page)
     reset_shared_upload_dialog(page)
-    normalize_gallery_files(page, input_name, label, icon_selector, before_count + len(file_paths))
+    normalize_gallery_files(page, input_name, label, icon_selector, expected_count)
     logger.info("{}上传完成", label)
 
 
@@ -360,7 +360,7 @@ def normalize_gallery_files(page: Page, input_name: str, label: str, icon_select
     if count < expected_count:
         raise RuntimeError(f"{label}上传数量不足：页面 {count} 张，期望 {expected_count} 张")
 
-    logger.warning("{}上传后多出 {} 张，自动删除旧项，只保留最后 {} 张", label, count - expected_count, expected_count)
+    logger.warning("{}上传后多出 {} 张，自动删除多余项，只保留前 {} 张", label, count - expected_count, expected_count)
     page.evaluate(
         """({name, label, iconSelector, expected}) => {
             const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
@@ -384,13 +384,12 @@ def normalize_gallery_files(page: Page, input_name: str, label: str, icon_select
             const inputs = Array.from(document.querySelectorAll(`input[name="${name}[]"]`));
             const inputItems = inputs.map(itemForInput);
             const seenInputItems = [...new Set(inputItems)];
-            const removeCount = Math.max(0, seenInputItems.length - expected);
-            for (const item of seenInputItems.slice(0, removeCount)) item.remove();
+            for (const item of seenInputItems.slice(expected)) item.remove();
 
             const hiddenLeft = document.querySelectorAll(`input[name="${name}[]"]`).length;
             if (hiddenLeft > expected) {
                 Array.from(document.querySelectorAll(`input[name="${name}[]"]`))
-                    .slice(0, hiddenLeft - expected)
+                    .slice(expected)
                     .forEach(input => input.remove());
             }
 
@@ -406,8 +405,7 @@ def normalize_gallery_files(page: Page, input_name: str, label: str, icon_select
                 })
                 .filter(Boolean);
             const seenVisualItems = [...new Set(visualItems)].filter(el => el.isConnected);
-            const visualRemoveCount = Math.max(0, seenVisualItems.length - expected);
-            for (const item of seenVisualItems.slice(0, visualRemoveCount)) item.remove();
+            for (const item of seenVisualItems.slice(expected)) item.remove();
         }""",
         {"name": input_name, "label": label, "iconSelector": icon_selector, "expected": expected_count},
     )
