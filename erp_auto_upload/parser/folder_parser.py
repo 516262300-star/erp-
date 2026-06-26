@@ -13,6 +13,7 @@ from parser.sku_parser import ParsedSku, parse_sku_from_stem
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4"}
 VIDEO_KEYWORDS = ("1:1", "1：1", "1-1", "800")
+IGNORED_MAIN_IMAGE_DIR_NAMES = {"B类主图", "B 类主图", "无牛皮癣图"}
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,17 @@ def list_detail_images(detail_dir: Path) -> list[Path]:
     return list_files(detail_dir, IMAGE_EXTENSIONS)
 
 
+def list_main_images(main_dir: Path) -> list[Path]:
+    ignored_dirs = (
+        [path.name for path in main_dir.iterdir() if path.is_dir() and path.name in IGNORED_MAIN_IMAGE_DIR_NAMES]
+        if main_dir.exists()
+        else []
+    )
+    if ignored_dirs:
+        logger.info("主图目录中检测到不上传子目录，已跳过：{}", ignored_dirs)
+    return list_files(main_dir, IMAGE_EXTENSIONS)
+
+
 def pick_video(video_dir: Path) -> Path | None:
     videos = list_files(video_dir, VIDEO_EXTENSIONS)
     matched = [path for path in videos if any(keyword in path.name for keyword in VIDEO_KEYWORDS)]
@@ -140,39 +152,16 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
     if not material_root.is_dir():
         raise RuntimeError(f"MATERIAL_ROOT 不是目录：{material_root}")
 
-    main_dir = first_matching_child_dir(
-        material_root,
-        "主图",
-        suffix="主图",
-        exclude_keywords=("无logo", "无 logo", "原图"),
-    ) or material_root / "主图"
-    main_original_dir = first_existing_dir(
-        main_dir / "无logo主图",
-        main_dir / "主图无logo",
-        main_dir / "无logo图",
-        main_dir / "无 logo 图",
-        main_dir / "去logo主图",
-        main_dir / "去 logo 主图",
-        main_dir / "无logo",
-        main_dir / "无 logo",
-        main_dir / "原图",
-        material_root / "无logo主图",
-        material_root / "主图无logo",
-        material_root / "无logo图",
-        material_root / "无 logo 图",
-        material_root / "去logo主图",
-        material_root / "去 logo 主图",
-    )
+    main_dir = material_root / "主图"
     detail_dir = first_existing_dir(material_root / "详情页", material_root / "详情")
     size_dir = material_root / "尺寸图"
     no_color_dir = first_existing_dir(material_root / "无色图", material_root / "无色")
     video_dir = material_root / "视频"
 
-    main_images = list_files(main_dir, IMAGE_EXTENSIONS)
+    main_images = list_main_images(main_dir)
     if not main_images:
-        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图 或以“主图”结尾的目录为空")
+        raise RuntimeError("主图缺失：MATERIAL_ROOT/主图 目录为空或不存在")
 
-    main_original_images = list_files(main_original_dir, IMAGE_EXTENSIONS)
     detail_images = list_detail_images(detail_dir)
     no_color_images = list_files(no_color_dir, IMAGE_EXTENSIONS)
     parsed_pairs = [(path, parse_sku_from_stem(path.stem, path)) for path in list_files(size_dir, IMAGE_EXTENSIONS)]
@@ -185,7 +174,7 @@ def parse_material_folder(material_root: Path) -> MaterialBundle:
         material_root=material_root,
         link_title=material_root.name,
         main_images=main_images,
-        main_original_images=main_original_images,
+        main_original_images=[],
         detail_images=detail_images,
         size_images=size_images,
         no_color_images=no_color_images,

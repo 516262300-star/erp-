@@ -83,7 +83,7 @@ def _resolve_video_file_input(page: Page, trigger_selector: str):
     return None, ""
 
 
-def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> None:
+def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> bool:
     find_progress_dialog = """
         () => {
             const visible = el => !!(
@@ -101,7 +101,7 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
         page.wait_for_function(find_progress_dialog, timeout=VIDEO_PROGRESS_APPEAR_TIMEOUT_MS)
     except PlaywrightTimeoutError:
         logger.info("未检测到视频上传进度弹窗，继续后续流程")
-        return
+        return False
 
     logger.info("检测到视频上传进度弹窗，等待出现上传成功")
     page.wait_for_function(
@@ -172,6 +172,52 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
     except PlaywrightTimeoutError:
         logger.warning("视频上传进度弹窗点击确定后仍未关闭，继续后续流程")
     logger.info("视频上传成功，已确认上传进度弹窗")
+    return True
+
+
+def trigger_video_upload(file_input) -> dict[str, str | bool]:
+    state = file_input.evaluate(
+        """
+        (el) => {
+            const trigger = (target, eventName) => {
+                target.dispatchEvent(new Event(eventName, {bubbles: true}));
+            };
+            trigger(el, "input");
+            trigger(el, "change");
+            if (window.jQuery) window.jQuery(el).trigger("change");
+
+            const form = el.closest("form");
+            if (!form) return {submitted: false, reason: "视频文件框不在独立上传表单内"};
+
+            const formText = [
+                form.id || "",
+                form.getAttribute("name") || "",
+                form.getAttribute("action") || "",
+                typeof form.className === "string" ? form.className : "",
+            ].join(" ").toLowerCase();
+            const looksLikeUploadForm = /upload|file|litpic|video|pic|image|media/.test(formText);
+            const looksLikeProductForm = !!form.querySelector(
+                "input[name='name'], #autoproduct, #addsku, button[type='submit'].btn-success"
+            );
+            if (!looksLikeUploadForm || looksLikeProductForm) {
+                return {
+                    submitted: false,
+                    reason: `跳过非独立视频上传表单：${formText || "unnamed form"}`,
+                };
+            }
+
+            if (window.jQuery) window.jQuery(form).submit();
+            else if (typeof form.requestSubmit === "function") form.requestSubmit();
+            else form.submit();
+            return {
+                submitted: true,
+                reason: `已提交视频上传表单：${form.id || form.getAttribute("name") || form.getAttribute("action") || "unnamed form"}`,
+            };
+        }
+        """
+    )
+    logger.info("视频上传触发结果：{}", state["reason"])
+    return state
 
 
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
@@ -208,8 +254,11 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         if selected_names != expected_names:
             raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
         logger.info("视频已挂载到文件框：{}，selector={}", selected_names, effective_selector)
-        wait_for_video_progress_modal(page)
-        logger.info("{}上传完成：{}", label, selected_names)
+        submit_state = trigger_video_upload(file_input)
+        confirmed = wait_for_video_progress_modal(page)
+        if not confirmed and not submit_state["submitted"]:
+            logger.warning("视频已挂载并触发 change，但未发现独立上传表单或上传进度弹窗，请检查 ERP 视频控件是否需要补 selector")
+        logger.info("{}上传流程已触发：{}", label, selected_names)
         return
 
     trigger = page.locator(trigger_selector)

@@ -313,18 +313,6 @@ def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[Price
     )
     _run_product_step(
         page,
-        "上传主图原图",
-        "upload_main_original_images",
-        lambda: upload_gallery_files(
-            page,
-            sel.MAIN_ORIGINAL_IMAGE_UPLOAD_TRIGGER,
-            "images_photoes",
-            bundle.main_original_images,
-            "主图原图",
-        ),
-    )
-    _run_product_step(
-        page,
         "上传详情图",
         "upload_detail_images",
         lambda: upload_editor_images(
