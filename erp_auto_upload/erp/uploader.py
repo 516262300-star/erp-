@@ -22,6 +22,10 @@ VIDEO_UPLOAD_FALLBACK_SELECTORS = [
 ]
 
 
+def is_video_label(label: str) -> bool:
+    return "视频" in label
+
+
 def ensure_files_exist(file_paths: list[Path]) -> None:
     missing = [str(path) for path in file_paths if not path.exists()]
     if missing:
@@ -179,15 +183,44 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
     state = file_input.evaluate(
         """
         (el) => {
+            const cssEscape = value => {
+                if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
+                return String(value).replace(/(["\\\\.#:[\\],>+~*^$|= ])/g, "\\\\$1");
+            };
             const trigger = (target, eventName) => {
                 target.dispatchEvent(new Event(eventName, {bubbles: true}));
             };
+            const result = {
+                submitted: false,
+                uploadifyTriggered: false,
+                reason: "",
+            };
+
+            el.scrollIntoView({block: "center", inline: "nearest"});
             trigger(el, "input");
             trigger(el, "change");
             if (window.jQuery) window.jQuery(el).trigger("change");
 
+            if (window.jQuery && el.id) {
+                const jq = window.jQuery(`#${cssEscape(el.id)}`);
+                if (typeof jq.uploadify === "function") {
+                    for (const args of [["upload", "*"], ["upload"]]) {
+                        try {
+                            jq.uploadify(...args);
+                            result.uploadifyTriggered = true;
+                            break;
+                        } catch (error) {
+                            result.reason = `Uploadify 触发失败：${error.message || error}`;
+                        }
+                    }
+                }
+            }
+
             const form = el.closest("form");
-            if (!form) return {submitted: false, reason: "视频文件框不在独立上传表单内"};
+            if (!form) {
+                result.reason = result.reason || "视频文件框不在独立上传表单内";
+                return result;
+            }
 
             const formText = [
                 form.id || "",
@@ -200,24 +233,54 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
                 "input[name='name'], #autoproduct, #addsku, button[type='submit'].btn-success"
             );
             if (!looksLikeUploadForm || looksLikeProductForm) {
-                return {
-                    submitted: false,
-                    reason: `跳过非独立视频上传表单：${formText || "unnamed form"}`,
-                };
+                result.reason = result.reason || `跳过非独立视频上传表单：${formText || "unnamed form"}`;
+                return result;
             }
 
             if (window.jQuery) window.jQuery(form).submit();
             else if (typeof form.requestSubmit === "function") form.requestSubmit();
             else form.submit();
-            return {
-                submitted: true,
-                reason: `已提交视频上传表单：${form.id || form.getAttribute("name") || form.getAttribute("action") || "unnamed form"}`,
-            };
+            result.submitted = true;
+            result.reason = `已提交视频上传表单：${form.id || form.getAttribute("name") || form.getAttribute("action") || "unnamed form"}`;
+            return result;
         }
         """
     )
-    logger.info("视频上传触发结果：{}", state["reason"])
+    logger.info(
+        "视频上传触发结果：{}；uploadifyTriggered={} submitted={}",
+        state["reason"],
+        state["uploadifyTriggered"],
+        state["submitted"],
+    )
     return state
+
+
+def wait_for_video_file_registered(page: Page, timeout: int = 20_000) -> bool:
+    try:
+        page.wait_for_function(
+            """
+            () => {
+                const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+                const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+                const videoText = Array.from(document.querySelectorAll("body *"))
+                    .filter(visible)
+                    .map(textOf)
+                    .join(" ");
+                if (/上传成功|上传完成/.test(videoText) && /视频|主图视频/.test(videoText)) return true;
+                return Array.from(document.querySelectorAll("input[type='hidden'], input:not([type])"))
+                    .some(input => {
+                        const name = input.getAttribute("name") || "";
+                        const id = input.id || "";
+                        const value = (input.value || "").trim();
+                        return /litpic|video/i.test(`${name} ${id}`) && /\\.(mp4|mov|m4v|webm)(\\?|$)|\\/video\\//i.test(value);
+                    });
+            }
+            """,
+            timeout=timeout,
+        )
+        return True
+    except PlaywrightTimeoutError:
+        return False
 
 
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
@@ -229,7 +292,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
 
     ensure_files_exist(file_paths)
     logger.info("开始处理{}：{} 个", label, len(file_paths))
-    if label == "视频":
+    if is_video_label(label):
         for path in file_paths:
             size_mb = file_size_mb(path)
             logger.info("视频文件：{}，大小 {} MB", path.name, size_mb)
@@ -240,7 +303,8 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
                     size_mb,
                 )
 
-    if label == "视频":
+    if is_video_label(label):
+        close_upload_modal(page)
         file_input, effective_selector = _resolve_video_file_input(page, trigger_selector)
         if file_input is None:
             controls = describe_upload_controls(page)
@@ -248,6 +312,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
                 f"{label}上传文件框未找到：selector={trigger_selector}。"
                 f"页面上可见/相关上传控件：{controls or '未发现 input[type=file] 或上传按钮'}"
             )
+        file_input.evaluate("el => { el.value = ''; el.scrollIntoView({block: 'center', inline: 'nearest'}); }")
         file_input.set_input_files([str(path) for path in file_paths])
         selected_names = file_input.evaluate("el => Array.from(el.files || []).map(file => file.name)")
         expected_names = [path.name for path in file_paths]
@@ -256,8 +321,16 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         logger.info("视频已挂载到文件框：{}，selector={}", selected_names, effective_selector)
         submit_state = trigger_video_upload(file_input)
         confirmed = wait_for_video_progress_modal(page)
-        if not confirmed and not submit_state["submitted"]:
-            logger.warning("视频已挂载并触发 change，但未发现独立上传表单或上传进度弹窗，请检查 ERP 视频控件是否需要补 selector")
+        registered = False if confirmed else wait_for_video_file_registered(page)
+        if not confirmed and not registered:
+            controls = describe_upload_controls(page)
+            if not submit_state["submitted"] and not submit_state["uploadifyTriggered"]:
+                logger.warning(
+                    "视频已挂载并触发 change，但未发现独立上传表单、Uploadify 触发点或上传进度弹窗；页面上传控件：{}",
+                    controls,
+                )
+            else:
+                logger.warning("视频上传已触发，但未检测到上传成功反馈；请在页面确认主图视频是否生成")
         logger.info("{}上传流程已触发：{}", label, selected_names)
         return
 
@@ -277,7 +350,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         expected_names = [path.name for path in file_paths]
         if selected_names != expected_names:
             raise RuntimeError(f"{label}文件框校验失败：页面 {selected_names}，期望 {expected_names}")
-        if label == "视频":
+        if is_video_label(label):
             wait_for_video_progress_modal(page)
             logger.info("{}上传完成：{}", label, selected_names)
         else:

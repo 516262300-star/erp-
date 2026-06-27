@@ -357,9 +357,9 @@ def upload_materials(page: Page, bundle: MaterialBundle, sku_results: list[Price
     if bundle.video:
         _run_product_step(
             page,
-            "上传视频",
+            "上传主图视频",
             "upload_video",
-            lambda: upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "视频"),
+            lambda: upload_files(page, sel.VIDEO_UPLOAD_TRIGGER, [bundle.video], "主图视频"),
         )
     else:
         logger.warning("未找到符合规则的视频，跳过视频上传")
