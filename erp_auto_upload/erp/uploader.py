@@ -354,6 +354,10 @@ def wait_for_gallery_settle(page: Page, input_name: str, stable_seconds: float =
 
 
 def normalize_gallery_files(page: Page, input_name: str, label: str, icon_selector: str, expected_count: int) -> None:
+    broken_count = prune_broken_gallery_items(page, input_name, label, icon_selector)
+    if broken_count:
+        logger.warning("{}上传后清理图裂占位 {} 张", label, broken_count)
+
     count = gallery_file_count(page, input_name, label, icon_selector)
     if count == expected_count:
         return
@@ -413,6 +417,60 @@ def normalize_gallery_files(page: Page, input_name: str, label: str, icon_select
     final_count = gallery_file_count(page, input_name, label, icon_selector)
     if final_count != expected_count:
         raise RuntimeError(f"{label}上传数量校验失败：页面 {final_count} 张，期望 {expected_count} 张")
+
+
+def prune_broken_gallery_items(page: Page, input_name: str, label: str, icon_selector: str) -> int:
+    return int(
+        page.evaluate(
+            """({name, label, iconSelector}) => {
+                const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+                const icon = document.querySelector(iconSelector);
+                const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+                const itemForImage = img => {
+                    let node = img;
+                    for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+                        if (icon && node.contains(icon)) break;
+                        if ((node.innerText || "").includes("删除")) return node;
+                    }
+                    return null;
+                };
+                const itemForInput = input => {
+                    let node = input;
+                    for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+                        if (node.querySelector("img") && (node.innerText || "").includes("删除")) return node;
+                    }
+                    return input;
+                };
+                const inputItems = Array.from(document.querySelectorAll(`input[name="${name}[]"]`))
+                    .map(itemForInput)
+                    .filter(Boolean);
+                const inputItemSet = new Set(inputItems);
+                const candidateSections = [];
+                if (icon) {
+                    for (let node = icon.parentElement, depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+                        candidateSections.push(node);
+                    }
+                }
+                const section = candidateSections.find(node => {
+                    const imgs = Array.from(node.querySelectorAll("img")).filter(img => !img.closest("label"));
+                    if (!imgs.length || !textOf(node).includes(label)) return false;
+                    const items = imgs.map(itemForImage).filter(Boolean);
+                    return items.some(item => inputItemSet.has(item));
+                }) || candidateSections.find(node => textOf(node).includes(label)) || document;
+
+                const brokenItems = Array.from(section.querySelectorAll("img"))
+                    .filter(img => !img.closest("label"))
+                    .filter(img => visible(img) && img.complete && img.naturalWidth === 0)
+                    .map(itemForImage)
+                    .filter(Boolean)
+                    .filter(item => !(icon && item.contains(icon)));
+                const uniqueItems = [...new Set(brokenItems)].filter(item => item.isConnected);
+                for (const item of uniqueItems) item.remove();
+                return uniqueItems.length;
+            }""",
+            {"name": input_name, "label": label, "iconSelector": icon_selector},
+        )
+    )
 
 
 def gallery_file_count(page: Page, input_name: str, label: str, icon_selector: str) -> int:
