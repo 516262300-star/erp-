@@ -74,7 +74,7 @@ DETAIL_EDITOR_UPLOAD_IMAGE_BUTTON = "#editor-toolbar button[data-menu-key='uploa
 DETAIL_EDITOR_BODY_TEXTAREA = "textarea#idimg[name='body']"  # ERP 内容编辑器提交用隐藏字段
 DETAIL_EDITOR_CONTENT_AREA = "#w-e-textarea-1"  # ERP 内容编辑器正文可编辑区域
 SIZE_IMAGE_UPLOAD_TRIGGER = "input#jpg[name='userfile']"  # ERP 上传尺寸图文件框
-VIDEO_UPLOAD_TRIGGER = "input#file_upload3[name='litpic']"  # ERP 视频上传文件框
+VIDEO_UPLOAD_TRIGGER = "input#video_upload_file"  # ERP 主图视频上传文件框
 
 
 # Save

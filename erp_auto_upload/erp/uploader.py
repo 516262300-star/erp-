@@ -12,9 +12,7 @@ LARGE_VIDEO_WARNING_MB = 80
 VIDEO_PROGRESS_APPEAR_TIMEOUT_MS = 8_000
 VIDEO_PROGRESS_TIMEOUT_MS = 15 * 60_000
 VIDEO_UPLOAD_FALLBACK_SELECTORS = [
-    "input[type='file'][name='litpic']",
-    "input[type='file'][name='litpic[]']",
-    "input[type='file'][id*='file_upload'][name*='litpic']",
+    "input#video_upload_file[type='file']",
     "input[type='file'][accept*='video']",
     "input[type='file'][id*='video' i]",
     "input[type='file'][name*='video' i]",
@@ -23,7 +21,11 @@ VIDEO_UPLOAD_FALLBACK_SELECTORS = [
 
 
 def is_video_label(label: str) -> bool:
-    return "视频" in label
+    return "视频" in label or "video" in label.lower()
+
+
+def is_video_upload(trigger_selector: str, label: str) -> bool:
+    return is_video_label(label) or "video" in trigger_selector.lower()
 
 
 def ensure_files_exist(file_paths: list[Path]) -> None:
@@ -183,16 +185,12 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
     state = file_input.evaluate(
         """
         (el) => {
-            const cssEscape = value => {
-                if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
-                return String(value).replace(/(["\\\\.#:[\\],>+~*^$|= ])/g, "\\\\$1");
-            };
             const trigger = (target, eventName) => {
                 target.dispatchEvent(new Event(eventName, {bubbles: true}));
             };
             const result = {
                 submitted: false,
-                uploadifyTriggered: false,
+                changed: false,
                 reason: "",
             };
 
@@ -200,21 +198,7 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
             trigger(el, "input");
             trigger(el, "change");
             if (window.jQuery) window.jQuery(el).trigger("change");
-
-            if (window.jQuery && el.id) {
-                const jq = window.jQuery(`#${cssEscape(el.id)}`);
-                if (typeof jq.uploadify === "function") {
-                    for (const args of [["upload", "*"], ["upload"]]) {
-                        try {
-                            jq.uploadify(...args);
-                            result.uploadifyTriggered = true;
-                            break;
-                        } catch (error) {
-                            result.reason = `Uploadify 触发失败：${error.message || error}`;
-                        }
-                    }
-                }
-            }
+            result.changed = true;
 
             const form = el.closest("form");
             if (!form) {
@@ -228,7 +212,7 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
                 form.getAttribute("action") || "",
                 typeof form.className === "string" ? form.className : "",
             ].join(" ").toLowerCase();
-            const looksLikeUploadForm = /upload|file|litpic|video|pic|image|media/.test(formText);
+            const looksLikeUploadForm = /video/.test(formText);
             const looksLikeProductForm = !!form.querySelector(
                 "input[name='name'], #autoproduct, #addsku, button[type='submit'].btn-success"
             );
@@ -247,9 +231,9 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
         """
     )
     logger.info(
-        "视频上传触发结果：{}；uploadifyTriggered={} submitted={}",
+        "视频上传触发结果：{}；changed={} submitted={}",
         state["reason"],
-        state["uploadifyTriggered"],
+        state["changed"],
         state["submitted"],
     )
     return state
@@ -260,13 +244,11 @@ def wait_for_video_file_registered(page: Page, timeout: int = 20_000) -> bool:
         page.wait_for_function(
             """
             () => {
-                const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
-                const textOf = el => (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
-                const videoText = Array.from(document.querySelectorAll("body *"))
-                    .filter(visible)
-                    .map(textOf)
-                    .join(" ");
-                if (/上传成功|上传完成/.test(videoText) && /视频|主图视频/.test(videoText)) return true;
+                const videoSrc = (document.querySelector("#videosrc")?.value || "").trim();
+                const playerSrc = (document.querySelector("#play_video")?.getAttribute("src") || "").trim();
+                if (/\\.(mp4|mov|m4v|webm)(\\?|$)/i.test(videoSrc) || /\\.(mp4|mov|m4v|webm)(\\?|$)/i.test(playerSrc)) {
+                    return true;
+                }
                 return Array.from(document.querySelectorAll("input[type='hidden'], input:not([type])"))
                     .some(input => {
                         const name = input.getAttribute("name") || "";
@@ -292,7 +274,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
 
     ensure_files_exist(file_paths)
     logger.info("开始处理{}：{} 个", label, len(file_paths))
-    if is_video_label(label):
+    if is_video_upload(trigger_selector, label):
         for path in file_paths:
             size_mb = file_size_mb(path)
             logger.info("视频文件：{}，大小 {} MB", path.name, size_mb)
@@ -303,7 +285,7 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
                     size_mb,
                 )
 
-    if is_video_label(label):
+    if is_video_upload(trigger_selector, label):
         close_upload_modal(page)
         file_input, effective_selector = _resolve_video_file_input(page, trigger_selector)
         if file_input is None:
@@ -321,16 +303,19 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
         logger.info("视频已挂载到文件框：{}，selector={}", selected_names, effective_selector)
         submit_state = trigger_video_upload(file_input)
         confirmed = wait_for_video_progress_modal(page)
-        registered = False if confirmed else wait_for_video_file_registered(page)
-        if not confirmed and not registered:
+        registered = wait_for_video_file_registered(page)
+        if not registered:
             controls = describe_upload_controls(page)
-            if not submit_state["submitted"] and not submit_state["uploadifyTriggered"]:
+            if not submit_state["submitted"]:
                 logger.warning(
-                    "视频已挂载并触发 change，但未发现独立上传表单、Uploadify 触发点或上传进度弹窗；页面上传控件：{}",
+                    "视频已挂载并触发 change，但未检测到 #videosrc 或播放器 src 写入视频地址；页面上传控件：{}",
                     controls,
                 )
             else:
-                logger.warning("视频上传已触发，但未检测到上传成功反馈；请在页面确认主图视频是否生成")
+                logger.warning("视频上传已触发，但未检测到 #videosrc 或播放器 src 写入视频地址")
+            raise RuntimeError("主图视频上传失败：上传接口返回后没有写入 ERP 的视频字段")
+        if confirmed:
+            logger.info("主图视频上传进度已确认成功")
         logger.info("{}上传流程已触发：{}", label, selected_names)
         return
 
