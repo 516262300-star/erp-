@@ -11,6 +11,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 LARGE_VIDEO_WARNING_MB = 80
 VIDEO_PROGRESS_APPEAR_TIMEOUT_MS = 8_000
 VIDEO_PROGRESS_TIMEOUT_MS = 15 * 60_000
+VIDEO_PREVIEW_TIMEOUT_MS = 60_000
 VIDEO_UPLOAD_FALLBACK_SELECTORS = [
     "input#video_upload_file[type='file']",
     "input[type='file'][accept*='video']",
@@ -89,7 +90,7 @@ def _resolve_video_file_input(page: Page, trigger_selector: str):
     return None, ""
 
 
-def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS) -> bool:
+def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIMEOUT_MS, confirm: bool = True) -> bool:
     find_progress_dialog = """
         () => {
             const visible = el => !!(
@@ -133,6 +134,10 @@ def wait_for_video_progress_modal(page: Page, timeout: int = VIDEO_PROGRESS_TIME
         """,
         timeout=timeout,
     )
+    if not confirm:
+        logger.info("视频上传进度弹窗已显示上传成功，按配置保留弹窗")
+        return True
+
     page.evaluate(
         """
         () => {
@@ -265,6 +270,89 @@ def wait_for_video_file_registered(page: Page, timeout: int = 20_000) -> bool:
         return False
 
 
+def wait_for_video_preview_ready(page: Page, timeout: int = VIDEO_PREVIEW_TIMEOUT_MS) -> bool:
+    try:
+        page.wait_for_function(
+            """
+            () => {
+                const hiddenValue = (document.querySelector("#videosrc")?.value || "").trim();
+                const player = document.querySelector("#play_video");
+                const src = (player?.currentSrc || player?.getAttribute("src") || "").trim();
+                const status = (document.querySelector("#video_upload_status")?.innerText || "").trim();
+                return player
+                    && (/\\.(mp4|mov|m4v|webm)(\\?|$)/i.test(hiddenValue) || /\\.(mp4|mov|m4v|webm)(\\?|$)/i.test(src))
+                    && (!status || status.includes("上传成功"));
+            }
+            """,
+            timeout=timeout,
+        )
+        page.evaluate(
+            """
+            () => {
+                const player = document.querySelector("#play_video");
+                if (!player) return;
+                player.preload = "auto";
+                player.muted = true;
+                const src = player.getAttribute("src") || "";
+                if (src && !player.currentSrc) player.load();
+            }
+            """
+        )
+        page.wait_for_function(
+            """
+            () => {
+                const player = document.querySelector("#play_video");
+                if (!player) return false;
+                if (player.readyState >= 1 && !player.dataset.erpPreviewSeeked) {
+                    player.dataset.erpPreviewSeeked = "1";
+                    try {
+                        if (Number.isFinite(player.duration) && player.duration > 0.3) {
+                            player.currentTime = Math.min(0.3, player.duration / 10);
+                        }
+                    } catch (_) {}
+                }
+                return player.readyState >= 2 && player.videoWidth > 0 && player.videoHeight > 0;
+            }
+            """,
+            timeout=timeout,
+        )
+        state = page.evaluate(
+            """
+            () => {
+                const player = document.querySelector("#play_video");
+                return {
+                    src: player?.currentSrc || player?.getAttribute("src") || "",
+                    readyState: player?.readyState || 0,
+                    videoWidth: player?.videoWidth || 0,
+                    videoHeight: player?.videoHeight || 0,
+                    status: (document.querySelector("#video_upload_status")?.innerText || "").trim(),
+                };
+            }
+            """
+        )
+        logger.info("主图视频预览已加载：{}", state)
+        return True
+    except PlaywrightTimeoutError:
+        state = page.evaluate(
+            """
+            () => {
+                const player = document.querySelector("#play_video");
+                return {
+                    hiddenValue: (document.querySelector("#videosrc")?.value || "").trim(),
+                    src: player?.currentSrc || player?.getAttribute("src") || "",
+                    readyState: player?.readyState || 0,
+                    videoWidth: player?.videoWidth || 0,
+                    videoHeight: player?.videoHeight || 0,
+                    status: (document.querySelector("#video_upload_status")?.innerText || "").trim(),
+                    networkState: player?.networkState || 0,
+                };
+            }
+            """
+        )
+        logger.warning("主图视频字段已写入但播放器预览未加载完成：{}", state)
+        return False
+
+
 def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], label: str = "文件") -> None:
     if not file_paths:
         logger.info("{}为空，跳过上传", label)
@@ -314,6 +402,9 @@ def upload_files(page: Page, trigger_selector: str, file_paths: list[Path], labe
             else:
                 logger.warning("视频上传已触发，但未检测到 #videosrc 或播放器 src 写入视频地址")
             raise RuntimeError("主图视频上传失败：上传接口返回后没有写入 ERP 的视频字段")
+        preview_ready = wait_for_video_preview_ready(page)
+        if not preview_ready:
+            raise RuntimeError("主图视频上传失败：视频字段已写入，但播放器没有加载出可预览画面")
         if confirmed:
             logger.info("主图视频上传进度已确认成功")
         logger.info("{}上传流程已触发：{}", label, selected_names)
