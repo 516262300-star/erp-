@@ -61,6 +61,22 @@ def fill_link_title(page: Page, link_title: str) -> None:
     page.locator(sel.LINK_TITLE_INPUT).fill(link_title)
 
 
+def normalize_model_text(text: str) -> str:
+    return text.replace("孔距", "").replace(" ", "").strip()
+
+
+def model_option_matches(option: str, expected_text: str) -> bool:
+    return normalize_model_text(option) == normalize_model_text(expected_text)
+
+
+def model_search_queries(query: str) -> list[str]:
+    queries = [query]
+    normalized = normalize_model_text(query)
+    if normalized and normalized not in queries:
+        queries.append(normalized)
+    return queries
+
+
 def select_autocomplete_option(
     page: Page,
     input_selector: str,
@@ -75,7 +91,12 @@ def select_autocomplete_option(
 
     last_options: list[str] = []
     has_fallback = bool(fallback_queries)
-    search_plan: list[tuple[str, str, bool]] = [(query, expected_text, False)]
+    if input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
+        search_plan: list[tuple[str, str, bool]] = [
+            (model_query, expected_text, False) for model_query in model_search_queries(query)
+        ]
+    else:
+        search_plan = [(query, expected_text, False)]
     search_plan.extend((fallback_query, fallback_query, True) for fallback_query in (fallback_queries or []) if fallback_query)
 
     for current_query, current_expected, allow_unique_prefix in search_plan:
@@ -112,6 +133,8 @@ def select_autocomplete_option(
             )
             last_options = options
             matched_text = expected_text if expected_text in options else ""
+            if not matched_text and input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
+                matched_text = next((option for option in options if model_option_matches(option, expected_text)), "")
             if not matched_text and input_selector == sel.SKU_MODEL_INPUT_IN_ROW:
                 matched_text = next((option for option in options if option.startswith(expected_text)), "")
             if not matched_text and allow_unique_prefix:
