@@ -11,6 +11,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 LARGE_VIDEO_WARNING_MB = 80
 VIDEO_PROGRESS_APPEAR_TIMEOUT_MS = 8_000
 VIDEO_PROGRESS_TIMEOUT_MS = 15 * 60_000
+VIDEO_FILE_REGISTER_TIMEOUT_MS = VIDEO_PROGRESS_TIMEOUT_MS
 VIDEO_PREVIEW_TIMEOUT_MS = 60_000
 VIDEO_UPLOAD_FALLBACK_SELECTORS = [
     "input#video_upload_file[type='file']",
@@ -244,7 +245,26 @@ def trigger_video_upload(file_input) -> dict[str, str | bool]:
     return state
 
 
-def wait_for_video_file_registered(page: Page, timeout: int = 20_000) -> bool:
+def video_upload_state(page: Page) -> dict[str, str | int]:
+    return page.evaluate(
+        """
+        () => {
+            const player = document.querySelector("#play_video");
+            return {
+                hiddenValue: (document.querySelector("#videosrc")?.value || "").trim(),
+                src: player?.currentSrc || player?.getAttribute("src") || "",
+                readyState: player?.readyState || 0,
+                videoWidth: player?.videoWidth || 0,
+                videoHeight: player?.videoHeight || 0,
+                status: (document.querySelector("#video_upload_status")?.innerText || "").trim(),
+                networkState: player?.networkState || 0,
+            };
+        }
+        """
+    )
+
+
+def wait_for_video_file_registered(page: Page, timeout: int = VIDEO_FILE_REGISTER_TIMEOUT_MS) -> bool:
     try:
         page.wait_for_function(
             """
@@ -267,6 +287,7 @@ def wait_for_video_file_registered(page: Page, timeout: int = 20_000) -> bool:
         )
         return True
     except PlaywrightTimeoutError:
+        logger.warning("等待视频写入 ERP 字段超时：{}", video_upload_state(page))
         return False
 
 
@@ -333,23 +354,7 @@ def wait_for_video_preview_ready(page: Page, timeout: int = VIDEO_PREVIEW_TIMEOU
         logger.info("主图视频预览已加载：{}", state)
         return True
     except PlaywrightTimeoutError:
-        state = page.evaluate(
-            """
-            () => {
-                const player = document.querySelector("#play_video");
-                return {
-                    hiddenValue: (document.querySelector("#videosrc")?.value || "").trim(),
-                    src: player?.currentSrc || player?.getAttribute("src") || "",
-                    readyState: player?.readyState || 0,
-                    videoWidth: player?.videoWidth || 0,
-                    videoHeight: player?.videoHeight || 0,
-                    status: (document.querySelector("#video_upload_status")?.innerText || "").trim(),
-                    networkState: player?.networkState || 0,
-                };
-            }
-            """
-        )
-        logger.warning("主图视频字段已写入但播放器预览未加载完成：{}", state)
+        logger.warning("主图视频字段已写入但播放器预览未加载完成：{}", video_upload_state(page))
         return False
 
 
