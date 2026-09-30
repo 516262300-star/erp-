@@ -18,8 +18,6 @@ SCREENSHOT_DIR = LOG_DIR / "screenshots"
 
 class Settings(BaseModel):
     erp_login_url: Optional[str] = Field(default=None, alias="ERP_LOGIN_URL")
-    erp_username: Optional[str] = Field(default=None, alias="ERP_USERNAME")
-    erp_password: Optional[str] = Field(default=None, alias="ERP_PASSWORD")
     erp_home_url: Optional[str] = Field(default=None, alias="ERP_HOME_URL")
     material_root: Optional[Path] = Field(default=None, alias="MATERIAL_ROOT")
     browser_channel: Optional[str] = Field(default="chrome", alias="BROWSER_CHANNEL")
@@ -35,17 +33,9 @@ class Settings(BaseModel):
             raise RuntimeError("缺少 MATERIAL_ROOT：请在 .env 中填写桌面素材根目录")
         return self.material_root
 
-    def require_login(self) -> tuple[str, str, str]:
-        missing = []
-        if not self.erp_login_url:
-            missing.append("ERP_LOGIN_URL")
-        if not self.erp_username:
-            missing.append("ERP_USERNAME")
-        if not self.erp_password:
-            missing.append("ERP_PASSWORD")
-        if missing:
-            raise RuntimeError(f"缺少登录配置：{', '.join(missing)}")
-        return self.erp_login_url or "", self.erp_username or "", self.erp_password or ""
+    def require_login(self) -> str:
+        # Authenticate against a read-only profile before entering business pages.
+        return "https://ldswj.net/leedis/index.php/login/profile"
 
 
 def setup_logging() -> None:

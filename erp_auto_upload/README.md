@@ -62,8 +62,6 @@ Copy-Item .env.example .env
 
 ```dotenv
 ERP_LOGIN_URL=https://你的ERP登录地址
-ERP_USERNAME=你的账号
-ERP_PASSWORD=你的密码
 ERP_HOME_URL=https://你的ERP首页地址
 BROWSER_CHANNEL=chrome
 MATERIAL_ROOT=
@@ -72,6 +70,27 @@ MATERIAL_ROOT=
 `MATERIAL_ROOT` 可以留空。因为每次上架的商品素材路径都会变，推荐运行命令时用 `--material-root` 指定本次商品素材目录。链接标题会直接取这个目录名，例如 `2701云栖`。
 
 `BROWSER_CHANNEL=chrome` 表示打开本机正常安装的 Google Chrome 浏览器。
+
+## ERP 客户端登录（2026-09-30）
+
+ERP 统一复用 **Leedis 桌面客户端**。先在客户端完成登录，任务通过客户端“打开系统”取得专用 ERP Chrome 的网页登录态；不再读取 ERP_USERNAME、ERP_PHONE、ERP_PASSWORD，也不回退账号密码或脚本扫码登录。客户端凭据仍由客户端和 Windows 凭据管理器保管。任务只在内存使用 ldswj.net 的网站 Cookie，不再读取旧 `.auth/session.json`、`.erp_session.bin` 或 `states/erp.json`。
+
+本机已配置客户端。换电脑时安装 LeedisClient.exe、Google Chrome 和项目 requirements.txt，然后运行工作台仓库的安装命令（替换成实际客户端路径）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/setup_erp_client.ps1 -ClientExe "D:\desktop\客户端登录\Leedis-Windows\LeedisClient.exe"
+```
+
+配置保存在 `%LOCALAPPDATA%/LeedisDesktop/workbench-config.json`，只记录客户端路径；也可用 `ERP_CLIENT_EXE` 覆盖路径。安装脚本生成客户端需要的 `%USERPROFILE%/Desktop/ERP Chrome.lnk`，使用独立浏览器目录 `%LOCALAPPDATA%/LeedisDesktop/erp-chrome` 和本机 9222 端口。已有配置和快捷方式先备份再更新。网站登录态属于敏感本机数据，不提交到 GitHub。
+
+客户端尚未运行时自动启动并尝试恢复已有登录；未登录、客户端忙、9222 不可用或登录过期无法恢复时，任务失败并显示提示。请在客户端登录后重试原任务；不会自动尝试账号密码，不会关闭客户端或 ERP Chrome。自动任务仍需在已登录 Windows 的同一用户会话下执行。切换客户端账号后，应结束当前任务并重新运行。
+
+```powershell
+python erp_desktop_auth.py login  # 客户端登录，需要授权时由本人完成
+python erp_desktop_auth.py check  # 打开系统并只读检查网页会话
+```
+
+公共接入代码维护源为工作台 `tools/erp_desktop_auth.py`；各业务仓库包含同版副本，可独立运行。更新公共模块时同步四个业务副本。升级无需移植旧网页 Cookie，旧密码配置可自行删除，程序已不再使用。
 
 ## 素材目录约定
 

@@ -96,10 +96,10 @@ def cmd_login() -> None:
     from erp.login import login
 
     settings = load_settings()
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         keep_browser_open(page)
     finally:
         close_browser(playwright, browser, context)
@@ -111,10 +111,10 @@ def cmd_price_query(material_root_arg: str | None) -> None:
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         results = [query_price_and_spec_code(page, sku) for sku in bundle.skus]
         payload = [
             {
@@ -152,10 +152,10 @@ def cmd_precheck(material_root_arg: str | None, pause: bool) -> None:
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         open_create_product_page(page, settings.erp_home_url)
         results = precheck_skus(page, bundle)
         print(json.dumps([precheck_result_to_dict(result) for result in results], ensure_ascii=False, indent=2))
@@ -172,10 +172,10 @@ def cmd_upload(save: bool, material_root_arg: str | None, pause: bool) -> None:
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         create_product(page, bundle, home_url=settings.erp_home_url, save=save)
         logger.info("流程完成")
         if pause:
@@ -203,10 +203,10 @@ def cmd_form_test(material_root_arg: str | None, pause: bool) -> None:
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         open_create_product_page(page, settings.erp_home_url)
         fill_link_title(page, bundle.link_title)
         fill_skus(page, bundle)
@@ -231,10 +231,10 @@ def cmd_upload_test(material_root_arg: str | None, pause: bool) -> None:
 
     settings = load_settings()
     bundle = parse_material_folder(resolve_material_root(material_root_arg))
-    login_url, username, password = settings.require_login()
+    login_url = settings.require_login()
     playwright, browser, context, page = launch_page(headless=False)
     try:
-        login(page, login_url, username, password)
+        login(page, login_url)
         open_create_product_page(page, settings.erp_home_url)
         fill_link_title(page, bundle.link_title)
         sku_results = fill_skus(page, bundle)
